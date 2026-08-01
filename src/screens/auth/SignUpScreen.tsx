@@ -15,6 +15,7 @@ import { useFocusEffect } from '@react-navigation/native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { AuthTextInput } from '../../components/auth/AuthTextInput';
+import { BackButton } from '../../components/common/BackButton';
 import { DamgilLogo } from '../../components/home/DamgilLogo';
 import { useAuth } from '../../context/AuthContext';
 import { AuthStackParamList, TermsType } from '../../navigation/types';
@@ -167,6 +168,9 @@ export function SignUpScreen({ navigation }: Props) {
         style={styles.flex}
         behavior={Platform.OS === 'ios' ? 'padding' : undefined}
       >
+        <View style={styles.topBar}>
+          <BackButton target="Login" />
+        </View>
         <ScrollView
           contentContainerStyle={styles.content}
           keyboardShouldPersistTaps="handled"
@@ -419,6 +423,11 @@ const styles = StyleSheet.create({
   },
   flex: {
     flex: 1,
+  },
+  topBar: {
+    paddingHorizontal: spacing.lg,
+    paddingTop: spacing.xs,
+    paddingBottom: spacing.xs,
   },
   content: {
     flexGrow: 1,
