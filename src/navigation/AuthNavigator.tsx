@@ -13,7 +13,7 @@ export function AuthNavigator() {
       initialRouteName="Login"
       screenOptions={{
         headerShown: false,
-        animation: 'fade',
+        animation: 'slide_from_bottom',
       }}
     >
       <Stack.Screen name="Login" component={LoginScreen} />

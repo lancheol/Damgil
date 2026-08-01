@@ -169,7 +169,7 @@ export function SignUpScreen({ navigation }: Props) {
         behavior={Platform.OS === 'ios' ? 'padding' : undefined}
       >
         <View style={styles.topBar}>
-          <BackButton target="Login" />
+          <BackButton onPress={() => navigation.popToTop()} />
         </View>
         <ScrollView
           contentContainerStyle={styles.content}
