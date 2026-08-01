@@ -1,0 +1,27 @@
+---
+description: Damgil UI design language — keep all screens consistent with the analog travel diary aesthetic
+alwaysApply: true
+---
+
+# Damgil Design Language
+
+Travel diary app. Visual direction: **minimal analog notebook**, not a dashboard.
+
+## Do
+
+- Light gray canvas (`#F2F2F2`), black/white high contrast, quiet spacing
+- Hero moments: black rounded stage + white paper + masking-tape motif when empty/storytelling
+- Screen titles: bold sans; in-notebook copy: monospace (Courier / monospace)
+- Accent sparingly — active tab blue (`#2F6BFF`) only; primary actions = black buttons
+- Floating pill bottom tabs; circular `+` FAB for create
+- Style with `StyleSheet` + tokens in `src/theme/` (`colors`, `spacing`, `typography`, `radii`)
+
+## Don't
+
+- Purple/indigo gradients, neon glow, cream+serif+terracotta AI defaults
+- Dark mode as default, badge/chip clusters, stat strips, card grids in hero
+- Generic Inter-like “startup SaaS” look or dense newspaper layouts
+
+## Continuity
+
+New screens (Search, My Page, diary create, settings) must feel like the same product as Home empty state: paper, ink, tape, calm whitespace.
