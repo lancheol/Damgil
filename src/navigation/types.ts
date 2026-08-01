@@ -1,6 +1,9 @@
+export type TermsType = 'service' | 'privacy';
+
 export type AuthStackParamList = {
   Login: undefined;
   SignUp: undefined;
+  TermsDetail: { type: TermsType };
 };
 
 export type MainTabParamList = {

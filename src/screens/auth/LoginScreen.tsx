@@ -18,24 +18,25 @@ import { useAuth } from '../../context/AuthContext';
 import { AuthStackParamList } from '../../navigation/types';
 import { colors, radii, spacing, typography } from '../../theme';
 import { validateLoginForm } from '../../utils/authValidation';
+import { resetSignupTermsState } from '../../utils/signupTermsState';
 
 type Props = NativeStackScreenProps<AuthStackParamList, 'Login'>;
 
 type FormErrors = {
-  email?: string;
+  username?: string;
   password?: string;
 };
 
 export function LoginScreen({ navigation }: Props) {
   const { signIn } = useAuth();
-  const [email, setEmail] = useState('');
+  const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [errors, setErrors] = useState<FormErrors>({});
   const [submitting, setSubmitting] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
 
   const handleSubmit = async () => {
-    const nextErrors = validateLoginForm({ email, password });
+    const nextErrors = validateLoginForm({ username, password });
     setErrors(nextErrors);
     setFormError(null);
 
@@ -45,7 +46,7 @@ export function LoginScreen({ navigation }: Props) {
 
     try {
       setSubmitting(true);
-      await signIn(email.trim(), password);
+      await signIn(username.trim(), password);
     } catch {
       setFormError('로그인에 실패했습니다. 잠시 후 다시 시도해 주세요.');
     } finally {
@@ -67,19 +68,19 @@ export function LoginScreen({ navigation }: Props) {
           <View style={styles.brand}>
             <DamgilLogo size={64} />
             <Text style={styles.title}>담길에 오신 걸 환영해요</Text>
-            <Text style={styles.subtitle}>여행의 순간을 기록하기 위해 로그인해 주세요.</Text>
+            <Text style={styles.subtitle}>사용자 이름으로 로그인해 주세요.</Text>
           </View>
 
           <View style={styles.form}>
             <AuthTextInput
-              label="이메일"
-              value={email}
-              onChangeText={setEmail}
-              error={errors.email}
-              placeholder="you@example.com"
-              keyboardType="email-address"
-              textContentType="emailAddress"
-              autoComplete="email"
+              label="사용자 이름"
+              value={username}
+              onChangeText={setUsername}
+              error={errors.username}
+              placeholder="이름"
+              textContentType="username"
+              autoComplete="username"
+              autoCorrect={false}
               returnKeyType="next"
             />
             <AuthTextInput
@@ -120,7 +121,10 @@ export function LoginScreen({ navigation }: Props) {
 
           <Pressable
             accessibilityRole="button"
-            onPress={() => navigation.navigate('SignUp')}
+            onPress={() => {
+              resetSignupTermsState();
+              navigation.navigate('SignUp');
+            }}
             style={styles.switchRow}
           >
             <Text style={styles.switchText}>아직 계정이 없나요? </Text>

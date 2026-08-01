@@ -1,9 +1,11 @@
 import {
+  StyleProp,
   StyleSheet,
   Text,
   TextInput,
   TextInputProps,
   View,
+  ViewStyle,
 } from 'react-native';
 
 import { colors, radii, spacing, typography } from '../../theme';
@@ -13,6 +15,8 @@ type AuthTextInputProps = {
   value: string;
   onChangeText: (text: string) => void;
   error?: string;
+  hideLabel?: boolean;
+  containerStyle?: StyleProp<ViewStyle>;
 } & Omit<TextInputProps, 'value' | 'onChangeText'>;
 
 export function AuthTextInput({
@@ -20,11 +24,13 @@ export function AuthTextInput({
   value,
   onChangeText,
   error,
+  hideLabel = false,
+  containerStyle,
   ...inputProps
 }: AuthTextInputProps) {
   return (
-    <View style={styles.wrap}>
-      <Text style={styles.label}>{label}</Text>
+    <View style={[styles.wrap, containerStyle]}>
+      {hideLabel ? null : <Text style={styles.label}>{label}</Text>}
       <TextInput
         value={value}
         onChangeText={onChangeText}
