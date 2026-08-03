@@ -1,14 +1,9 @@
-import { Ionicons } from '@expo/vector-icons';
-import { Pressable, StyleSheet, Text, View } from 'react-native';
+import { StyleSheet, Text, View } from 'react-native';
 
-import { colors, radii, spacing, typography } from '../../theme';
+import { colors, spacing, typography } from '../../theme';
 import { DamgilLogo } from './DamgilLogo';
 
-type HomeHeaderProps = {
-  onPressSettings: () => void;
-};
-
-export function HomeHeader({ onPressSettings }: HomeHeaderProps) {
+export function HomeHeader() {
   return (
     <View style={styles.row}>
       <View style={styles.left}>
@@ -18,15 +13,6 @@ export function HomeHeader({ onPressSettings }: HomeHeaderProps) {
           <Text style={styles.greeting}>안녕하세요</Text>
         </View>
       </View>
-
-      <Pressable
-        accessibilityRole="button"
-        accessibilityLabel="설정"
-        onPress={onPressSettings}
-        style={({ pressed }) => [styles.settingsButton, pressed && styles.settingsPressed]}
-      >
-        <Ionicons name="settings-outline" size={22} color={colors.ink} />
-      </Pressable>
     </View>
   );
 }
@@ -57,22 +43,5 @@ const styles = StyleSheet.create({
   greeting: {
     ...typography.greeting,
     color: colors.inkSoft,
-  },
-  settingsButton: {
-    width: 44,
-    height: 44,
-    borderRadius: radii.pill,
-    backgroundColor: colors.white,
-    alignItems: 'center',
-    justifyContent: 'center',
-    shadowColor: colors.black,
-    shadowOpacity: 0.1,
-    shadowRadius: 8,
-    shadowOffset: { width: 0, height: 3 },
-    elevation: 3,
-  },
-  settingsPressed: {
-    opacity: 0.85,
-    transform: [{ scale: 0.97 }],
   },
 });

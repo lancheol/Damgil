@@ -16,40 +16,61 @@ export type SignUpPayload = {
   visibility: VisibilityRange;
 };
 
+type AuthUser = {
+  username: string;
+  bio: string;
+  followerCount: number;
+  followingCount: number;
+};
+
 type AuthContextValue = {
   isAuthenticated: boolean;
+  user: AuthUser | null;
   signIn: (username: string, password: string) => Promise<void>;
   signUp: (payload: SignUpPayload) => Promise<void>;
   signOut: () => void;
 };
 
+const DEFAULT_BIO = '매주 새로운 곳을 기록하는 다이어리 ✈️';
+
 const AuthContext = createContext<AuthContextValue | null>(null);
 
 export function AuthProvider({ children }: PropsWithChildren) {
-  const [isAuthenticated, setIsAuthenticated] = useState(false);
+  const [user, setUser] = useState<AuthUser | null>(null);
 
-  const signIn = useCallback(async (_username: string, _password: string) => {
+  const signIn = useCallback(async (username: string, _password: string) => {
     // TODO: 실제 인증 API 연동
-    setIsAuthenticated(true);
+    setUser({
+      username: username.trim() || 'traveler',
+      bio: DEFAULT_BIO,
+      followerCount: 1200,
+      followingCount: 128,
+    });
   }, []);
 
-  const signUp = useCallback(async (_payload: SignUpPayload) => {
+  const signUp = useCallback(async (payload: SignUpPayload) => {
     // TODO: 실제 회원가입 API 연동
-    setIsAuthenticated(true);
+    setUser({
+      username: payload.username.trim() || 'traveler',
+      bio: DEFAULT_BIO,
+      followerCount: 0,
+      followingCount: 0,
+    });
   }, []);
 
   const signOut = useCallback(() => {
-    setIsAuthenticated(false);
+    setUser(null);
   }, []);
 
   const value = useMemo(
     () => ({
-      isAuthenticated,
+      isAuthenticated: user !== null,
+      user,
       signIn,
       signUp,
       signOut,
     }),
-    [isAuthenticated, signIn, signUp, signOut],
+    [user, signIn, signUp, signOut],
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

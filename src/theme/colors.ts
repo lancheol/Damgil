@@ -5,6 +5,7 @@ export const colors = {
   inkMuted: '#8A8A8A',
   inkSoft: '#555555',
   backArrow: '#8B9BB0',
+  placeholder: '#ABB7C2',
   border: '#E5E5E5',
   black: '#000000',
   white: '#FFFFFF',

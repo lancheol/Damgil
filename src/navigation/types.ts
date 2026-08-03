@@ -16,6 +16,14 @@ export type RootStackParamList = {
   Auth: undefined;
   Main: undefined;
   Settings: undefined;
+  CreateDiary: undefined;
+  DiaryCamera: { diaryId: string };
+  DiaryPhotoEntry: { diaryId: string; photoUri: string; mediaType?: 'photo' | 'video' };
+  DiaryPhotoGallery: { diaryId: string };
+  DiaryEdit: { diaryId: string };
+  DiaryCoverEdit: { diaryId: string };
+  DiaryRecordDetail: { diaryId: string; photoId: string };
+  DiaryRecordDecorate: { diaryId: string; photoId: string };
 };
 
 declare global {
