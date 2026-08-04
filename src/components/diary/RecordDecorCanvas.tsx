@@ -1,6 +1,7 @@
 import { useRef } from 'react';
 import {
   Image,
+  Pressable,
   StyleSheet,
   Text,
   View,
@@ -19,12 +20,17 @@ type RecordDecorCanvasProps = {
   fontId: DecorFontId;
   stickers: DecorSticker[];
   selectedStickerId: string | null;
+  textSelected?: boolean;
+  fullBleed?: boolean;
   style?: ViewStyle;
   onSelectSticker?: (id: string | null) => void;
+  onSelectText?: () => void;
+  onBackgroundPress?: () => void;
   onMoveSticker?: (id: string, x: number, y: number) => void;
   onScaleSticker?: (id: string, scale: number) => void;
   onRotateSticker?: (id: string, rotation: number) => void;
   onStickerDragChange?: (dragging: boolean) => void;
+  onStickerDragEnd?: (id: string) => void;
 };
 
 export function RecordDecorCanvas({
@@ -34,12 +40,17 @@ export function RecordDecorCanvas({
   fontId,
   stickers,
   selectedStickerId,
+  textSelected = false,
+  fullBleed = false,
   style,
   onSelectSticker,
+  onSelectText,
+  onBackgroundPress,
   onMoveSticker,
   onScaleSticker,
   onRotateSticker,
   onStickerDragChange,
+  onStickerDragEnd,
 }: RecordDecorCanvasProps) {
   const layoutRef = useRef({ width: 1, height: 1 });
   const isVideo = mediaType === 'video';
@@ -63,7 +74,7 @@ export function RecordDecorCanvas({
 
   return (
     <View
-      style={[styles.canvas, style]}
+      style={[styles.canvas, fullBleed && styles.canvasFullBleed, style]}
       {...pinchHandlers}
       onLayout={(event) => {
         layoutRef.current = {
@@ -72,21 +83,28 @@ export function RecordDecorCanvas({
         };
       }}
     >
-      <Image source={{ uri }} style={styles.media} resizeMode="cover" />
-      {isVideo ? (
-        <View style={styles.videoBadge} pointerEvents="none">
-          <Text style={styles.videoBadgeText}>VIDEO · 원본 고정</Text>
-        </View>
-      ) : (
-        <View style={styles.lockBadge} pointerEvents="none">
-          <Text style={styles.lockBadgeText}>원본 고정</Text>
-        </View>
-      )}
+      <Pressable style={StyleSheet.absoluteFill} onPress={onBackgroundPress}>
+        <Image source={{ uri }} style={styles.media} resizeMode="cover" />
+      </Pressable>
 
-      {note.trim() ? (
-        <Text style={[styles.note, getDecorFontStyle(fontId)]} numberOfLines={4} pointerEvents="none">
-          {note.trim()}
-        </Text>
+      {isVideo ? (
+        <View style={styles.lockBadge} pointerEvents="none">
+          <Text style={styles.lockBadgeText}>VIDEO</Text>
+        </View>
+      ) : null}
+
+      {note.trim() || textSelected ? (
+        <Pressable
+          onPress={onSelectText}
+          style={[styles.noteHit, textSelected && styles.noteSelected]}
+        >
+          <Text
+            style={[styles.note, getDecorFontStyle(fontId)]}
+            numberOfLines={4}
+          >
+            {note.trim() || '문구를 입력하세요'}
+          </Text>
+        </Pressable>
       ) : null}
 
       {stickers.map((sticker) => (
@@ -100,6 +118,7 @@ export function RecordDecorCanvas({
           onScale={(scale) => onScaleSticker?.(sticker.id, scale)}
           onRotate={(rotation) => onRotateSticker?.(sticker.id, rotation)}
           onDragChange={onStickerDragChange}
+          onDragEnd={() => onStickerDragEnd?.(sticker.id)}
         />
       ))}
     </View>
@@ -114,46 +133,52 @@ const styles = StyleSheet.create({
     overflow: 'hidden',
     backgroundColor: colors.black,
   },
+  canvasFullBleed: {
+    flex: 1,
+    width: '100%',
+    height: '100%',
+    aspectRatio: undefined,
+    borderRadius: 0,
+  },
   media: {
     ...StyleSheet.absoluteFillObject,
   },
   lockBadge: {
     position: 'absolute',
-    top: 10,
-    right: 10,
+    top: 12,
+    right: 12,
     paddingHorizontal: 8,
     paddingVertical: 4,
     borderRadius: 4,
-    backgroundColor: 'rgba(0,0,0,0.55)',
+    backgroundColor: 'rgba(0,0,0,0.45)',
   },
   lockBadgeText: {
     ...typography.monoBody,
     fontSize: 10,
     color: colors.white,
+    letterSpacing: 0.6,
   },
-  videoBadge: {
+  noteHit: {
     position: 'absolute',
-    top: 10,
-    right: 10,
+    left: 20,
+    right: 20,
+    bottom: '18%',
     paddingHorizontal: 8,
-    paddingVertical: 4,
-    borderRadius: 4,
-    backgroundColor: 'rgba(0,0,0,0.55)',
+    paddingVertical: 6,
+    borderRadius: 8,
   },
-  videoBadgeText: {
-    ...typography.monoBody,
-    fontSize: 10,
-    color: colors.white,
+  noteSelected: {
+    backgroundColor: 'rgba(255,255,255,0.12)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.55)',
   },
   note: {
-    position: 'absolute',
-    left: 16,
-    right: 16,
-    bottom: 20,
-    fontSize: 18,
+    fontSize: 22,
+    lineHeight: 30,
     color: colors.white,
-    textShadowColor: 'rgba(0,0,0,0.5)',
+    textAlign: 'center',
+    textShadowColor: 'rgba(0,0,0,0.55)',
     textShadowOffset: { width: 0, height: 1 },
-    textShadowRadius: 4,
+    textShadowRadius: 5,
   },
 });

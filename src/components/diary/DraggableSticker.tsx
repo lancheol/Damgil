@@ -24,6 +24,7 @@ type DraggableStickerProps = {
   onScale: (scale: number) => void;
   onRotate: (rotation: number) => void;
   onDragChange?: (dragging: boolean) => void;
+  onDragEnd?: () => void;
 };
 
 function touchDistance(touches: NativeTouchEvent[]): number {
@@ -81,6 +82,7 @@ export function DraggableSticker({
   onScale,
   onRotate,
   onDragChange,
+  onDragEnd,
 }: DraggableStickerProps) {
   const stickerRef = useRef(sticker);
   stickerRef.current = sticker;
@@ -97,11 +99,13 @@ export function DraggableSticker({
   const onScaleRef = useRef(onScale);
   const onRotateRef = useRef(onRotate);
   const onDragChangeRef = useRef(onDragChange);
+  const onDragEndRef = useRef(onDragEnd);
   onSelectRef.current = onSelect;
   onMoveRef.current = onMove;
   onScaleRef.current = onScale;
   onRotateRef.current = onRotate;
   onDragChangeRef.current = onDragChange;
+  onDragEndRef.current = onDragEnd;
 
   const beginPinch = (touches: NativeTouchEvent[]) => {
     modeRef.current = 'pinch';
@@ -171,10 +175,12 @@ export function DraggableSticker({
       onPanResponderRelease: () => {
         modeRef.current = 'move';
         onDragChangeRef.current?.(false);
+        onDragEndRef.current?.();
       },
       onPanResponderTerminate: () => {
         modeRef.current = 'move';
         onDragChangeRef.current?.(false);
+        onDragEndRef.current?.();
       },
     }),
   ).current;

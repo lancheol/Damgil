@@ -86,9 +86,11 @@ export function RootNavigator() {
             <Stack.Screen
               name="DiaryRecordDecorate"
               component={DiaryRecordDecorateScreen}
-              options={{
-                animation: 'slide_from_right',
-              }}
+              options={({ route }) => ({
+                animation:
+                  route.params.transition === 'prev' ? 'slide_from_left' : 'slide_from_right',
+                animationTypeForReplace: route.params.transition === 'prev' ? 'pop' : 'push',
+              })}
             />
           </>
         ) : (

@@ -23,7 +23,12 @@ export type RootStackParamList = {
   DiaryEdit: { diaryId: string };
   DiaryCoverEdit: { diaryId: string };
   DiaryRecordDetail: { diaryId: string; photoId: string };
-  DiaryRecordDecorate: { diaryId: string; photoId: string };
+  DiaryRecordDecorate: {
+    diaryId: string;
+    photoId: string;
+    /** 이전/다음 이동 시 슬라이드 방향 */
+    transition?: 'prev' | 'next';
+  };
 };
 
 declare global {

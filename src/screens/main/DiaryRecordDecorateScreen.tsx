@@ -1,7 +1,11 @@
+import { Ionicons } from '@expo/vector-icons';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   Alert,
+  KeyboardAvoidingView,
+  Modal,
+  Platform,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -9,9 +13,8 @@ import {
   TextInput,
   View,
 } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import { BackButton } from '../../components/common/BackButton';
 import { RecordDecorCanvas } from '../../components/diary/RecordDecorCanvas';
 import { useDiaries } from '../../context/DiaryContext';
 import { RootStackParamList } from '../../navigation/types';
@@ -30,6 +33,9 @@ import {
 import { colors, radii, spacing, typography } from '../../theme';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'DiaryRecordDecorate'>;
+type ToolSheet = 'none' | 'sticker' | 'text' | 'more';
+
+const TRASH_Y = 0.88;
 
 function emptyDecoration(note = ''): PhotoDecoration {
   return {
@@ -42,6 +48,7 @@ function emptyDecoration(note = ''): PhotoDecoration {
 
 export function DiaryRecordDecorateScreen({ navigation, route }: Props) {
   const { diaryId, photoId } = route.params;
+  const insets = useSafeAreaInsets();
   const { getDiaryById, savePhotoDecoration, removePhotosFromDiary } = useDiaries();
   const diary = getDiaryById(diaryId);
 
@@ -61,8 +68,11 @@ export function DiaryRecordDecorateScreen({ navigation, route }: Props) {
   const [fontId, setFontId] = useState<DecorFontId>(initial.fontId);
   const [stickers, setStickers] = useState<DecorSticker[]>(initial.stickers);
   const [selectedStickerId, setSelectedStickerId] = useState<string | null>(null);
+  const [textSelected, setTextSelected] = useState(false);
   const [draggingSticker, setDraggingSticker] = useState(false);
+  const [trashHot, setTrashHot] = useState(false);
   const [dirty, setDirty] = useState(false);
+  const [sheet, setSheet] = useState<ToolSheet>('none');
 
   useEffect(() => {
     if (!photo) {
@@ -73,8 +83,11 @@ export function DiaryRecordDecorateScreen({ navigation, route }: Props) {
     setFontId(next.fontId);
     setStickers(next.stickers);
     setSelectedStickerId(null);
+    setTextSelected(false);
     setDraggingSticker(false);
+    setTrashHot(false);
     setDirty(false);
+    setSheet('none');
   }, [photoId, photo?.decoration?.updatedAt, photo?.id]);
 
   const markDirty = useCallback(() => setDirty(true), []);
@@ -94,7 +107,7 @@ export function DiaryRecordDecorateScreen({ navigation, route }: Props) {
     });
   }, [diary, photo, diaryId, stickers, note, fontId, savePhotoDecoration]);
 
-  const goToPhoto = (nextId: string) => {
+  const goToPhoto = (nextId: string, transition: 'prev' | 'next') => {
     if (dirty) {
       const ok = persist();
       if (!ok) {
@@ -103,7 +116,11 @@ export function DiaryRecordDecorateScreen({ navigation, route }: Props) {
       }
       setDirty(false);
     }
-    navigation.replace('DiaryRecordDecorate', { diaryId, photoId: nextId });
+    navigation.replace('DiaryRecordDecorate', {
+      diaryId,
+      photoId: nextId,
+      transition,
+    });
   };
 
   const handleSave = () => {
@@ -113,7 +130,7 @@ export function DiaryRecordDecorateScreen({ navigation, route }: Props) {
       return;
     }
     setDirty(false);
-    Alert.alert('저장됨', '장소 기록 꾸미기가 저장됐어요.');
+    navigation.goBack();
   };
 
   const handleBack = () => {
@@ -139,10 +156,11 @@ export function DiaryRecordDecorateScreen({ navigation, route }: Props) {
     ]);
   };
 
-  const handleDelete = () => {
+  const handleDeleteRecord = () => {
     if (!photo) {
       return;
     }
+    setSheet('none');
     Alert.alert(
       '기록 삭제',
       '이 장소 기록을 삭제할까요? 원본 미디어와 꾸미기 레이어가 함께 삭제됩니다.',
@@ -164,16 +182,55 @@ export function DiaryRecordDecorateScreen({ navigation, route }: Props) {
     );
   };
 
-  const selectedSticker = stickers.find((item) => item.id === selectedStickerId) ?? null;
+  const clearSelection = () => {
+    setSelectedStickerId(null);
+    setTextSelected(false);
+  };
+
+  const openTextTool = () => {
+    clearSelection();
+    setTextSelected(true);
+    setSheet('text');
+  };
+
+  const openStickerTool = () => {
+    setTextSelected(false);
+    setSheet('sticker');
+  };
+
+  const addSticker = (emoji: string) => {
+    const sticker: DecorSticker = {
+      id: createStickerId('record'),
+      emoji,
+      x: 0.5,
+      y: 0.42,
+      scale: 1,
+      rotation: 0,
+    };
+    setStickers((prev) => [...prev, sticker]);
+    setSelectedStickerId(sticker.id);
+    setTextSelected(false);
+    setSheet('none');
+    markDirty();
+  };
+
+  const deleteSelectedSticker = () => {
+    if (!selectedStickerId) {
+      return;
+    }
+    setStickers((prev) => prev.filter((item) => item.id !== selectedStickerId));
+    setSelectedStickerId(null);
+    markDirty();
+  };
 
   if (!diary || !photo) {
     return (
       <SafeAreaView style={styles.safe} edges={['top', 'bottom']}>
-        <View style={styles.header}>
-          <BackButton onPress={() => navigation.goBack()} />
-        </View>
         <View style={styles.centered}>
           <Text style={styles.emptyText}>기록을 찾을 수 없어요.</Text>
+          <Pressable onPress={() => navigation.goBack()} style={styles.doneButton}>
+            <Text style={styles.doneButtonText}>닫기</Text>
+          </Pressable>
         </View>
       </SafeAreaView>
     );
@@ -182,395 +239,587 @@ export function DiaryRecordDecorateScreen({ navigation, route }: Props) {
   const dayNumber = getDayNumberForPhoto(diary, photo);
   const hasPrev = currentIndex > 0;
   const hasNext = currentIndex >= 0 && currentIndex < orderedIds.length - 1;
+  const selectedSticker = stickers.find((item) => item.id === selectedStickerId) ?? null;
+  const showChrome = !draggingSticker && sheet === 'none';
 
   return (
-    <SafeAreaView style={styles.safe} edges={['top', 'bottom']}>
-      <View style={styles.header}>
-        <BackButton onPress={handleBack} />
-        <View style={styles.headerCopy}>
-          <Text style={styles.headerTitle} numberOfLines={1}>
-            {getPlaceLabel(photo)}
-          </Text>
-          <Text style={styles.headerSubtitle}>
-            {dayNumber}일차 · {formatRecordTime(photo.createdAt)}
-          </Text>
+    <View style={styles.root}>
+      <RecordDecorCanvas
+        uri={photo.uri}
+        mediaType={photo.mediaType}
+        note={note}
+        fontId={fontId}
+        stickers={stickers}
+        selectedStickerId={selectedStickerId}
+        textSelected={textSelected}
+        fullBleed
+        onBackgroundPress={clearSelection}
+        onSelectText={openTextTool}
+        onSelectSticker={(id) => {
+          setSelectedStickerId(id);
+          setTextSelected(false);
+          setSheet('none');
+        }}
+        onStickerDragChange={(dragging) => {
+          setDraggingSticker(dragging);
+          if (!dragging) {
+            setTrashHot(false);
+          }
+        }}
+        onMoveSticker={(id, x, y) => {
+          setStickers((prev) => prev.map((item) => (item.id === id ? { ...item, x, y } : item)));
+          setTrashHot(y >= TRASH_Y);
+          markDirty();
+        }}
+        onScaleSticker={(id, scale) => {
+          setStickers((prev) => prev.map((item) => (item.id === id ? { ...item, scale } : item)));
+          markDirty();
+        }}
+        onRotateSticker={(id, rotation) => {
+          setStickers((prev) => prev.map((item) => (item.id === id ? { ...item, rotation } : item)));
+          markDirty();
+        }}
+        onStickerDragEnd={(id) => {
+          setStickers((prev) => {
+            const target = prev.find((item) => item.id === id);
+            if (!target || target.y < TRASH_Y) {
+              return prev;
+            }
+            setSelectedStickerId(null);
+            markDirty();
+            return prev.filter((item) => item.id !== id);
+          });
+          setTrashHot(false);
+          setDraggingSticker(false);
+        }}
+      />
+
+      {/* Top chrome */}
+      <SafeAreaView pointerEvents="box-none" style={styles.topSafe} edges={['top']}>
+        <View style={styles.topBar} pointerEvents="box-none">
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel="닫기"
+            onPress={handleBack}
+            style={({ pressed }) => [styles.iconCircle, pressed && styles.pressed]}
+          >
+            <Ionicons name="close" size={24} color={colors.white} />
+          </Pressable>
+
+          {showChrome ? (
+            <View style={styles.topMeta} pointerEvents="none">
+              <Text style={styles.topTitle} numberOfLines={1}>
+                {getPlaceLabel(photo)}
+              </Text>
+              <Text style={styles.topSubtitle}>
+                {dayNumber}일차 · {formatRecordTime(photo.createdAt)} · {currentIndex + 1}/
+                {orderedIds.length}
+              </Text>
+            </View>
+          ) : (
+            <View style={styles.topMeta} />
+          )}
+
+          <Pressable
+            accessibilityRole="button"
+            onPress={handleSave}
+            style={({ pressed }) => [styles.doneButton, pressed && styles.pressed]}
+          >
+            <Text style={styles.doneButtonText}>완료</Text>
+          </Pressable>
         </View>
-        <Pressable
-          accessibilityRole="button"
-          onPress={handleSave}
-          style={({ pressed }) => [styles.saveChip, pressed && styles.pressed]}
-        >
-          <Text style={styles.saveChipText}>저장</Text>
-        </Pressable>
-      </View>
+      </SafeAreaView>
 
-      <ScrollView
-        contentContainerStyle={styles.content}
-        keyboardShouldPersistTaps="handled"
-        showsVerticalScrollIndicator={false}
-        scrollEnabled={!draggingSticker}
-      >
-        <RecordDecorCanvas
-          uri={photo.uri}
-          mediaType={photo.mediaType}
-          note={note}
-          fontId={fontId}
-          stickers={stickers}
-          selectedStickerId={selectedStickerId}
-          onSelectSticker={setSelectedStickerId}
-          onStickerDragChange={setDraggingSticker}
-          onMoveSticker={(id, x, y) => {
-            setStickers((prev) => prev.map((item) => (item.id === id ? { ...item, x, y } : item)));
-            markDirty();
-          }}
-          onScaleSticker={(id, scale) => {
-            setStickers((prev) => prev.map((item) => (item.id === id ? { ...item, scale } : item)));
-            markDirty();
-          }}
-          onRotateSticker={(id, rotation) => {
-            setStickers((prev) => prev.map((item) => (item.id === id ? { ...item, rotation } : item)));
-            markDirty();
-          }}
-        />
-
-        <Text style={styles.lockHint}>편집 단계에서는 사진·영상 원본을 바꾸거나 재촬영할 수 없어요.</Text>
-
-        <View style={styles.navRow}>
+      {/* Side navigation */}
+      {showChrome ? (
+        <>
           <Pressable
             disabled={!hasPrev}
-            onPress={() => hasPrev && goToPhoto(orderedIds[currentIndex - 1])}
-            style={[styles.navButton, !hasPrev && styles.navDisabled]}
+            onPress={() => hasPrev && goToPhoto(orderedIds[currentIndex - 1], 'prev')}
+            style={[styles.sideNav, styles.sideNavLeft, { top: insets.top + 86 }, !hasPrev && styles.sideNavDisabled]}
           >
-            <Text style={styles.navButtonText}>이전 장소</Text>
+            <Ionicons name="chevron-back" size={22} color={colors.white} />
           </Pressable>
-          <Text style={styles.navIndex}>
-            {currentIndex + 1} / {orderedIds.length}
-          </Text>
           <Pressable
             disabled={!hasNext}
-            onPress={() => hasNext && goToPhoto(orderedIds[currentIndex + 1])}
-            style={[styles.navButton, !hasNext && styles.navDisabled]}
+            onPress={() => hasNext && goToPhoto(orderedIds[currentIndex + 1], 'next')}
+            style={[styles.sideNav, styles.sideNavRight, { top: insets.top + 86 }, !hasNext && styles.sideNavDisabled]}
           >
-            <Text style={styles.navButtonText}>다음 장소</Text>
+            <Ionicons name="chevron-forward" size={22} color={colors.white} />
           </Pressable>
-        </View>
+        </>
+      ) : null}
 
-        <View style={styles.block}>
-          <Text style={styles.blockLabel}>기록 문구</Text>
-          <TextInput
-            value={note}
-            onChangeText={(text) => {
-              setNote(text);
-              markDirty();
-            }}
-            placeholder="짧은 기록을 남겨 보세요"
-            placeholderTextColor={colors.placeholder}
-            style={styles.noteInput}
-            multiline
-          />
+      {/* Drag-to-delete trash */}
+      {draggingSticker ? (
+        <View
+          pointerEvents="none"
+          style={[styles.trashZone, { paddingBottom: Math.max(insets.bottom, 16) + 8 }, trashHot && styles.trashZoneHot]}
+        >
+          <Ionicons name="trash" size={trashHot ? 34 : 28} color={colors.white} />
+          <Text style={styles.trashText}>{trashHot ? '놓아서 삭제' : '여기로 끌어 삭제'}</Text>
         </View>
+      ) : null}
 
-        <View style={styles.block}>
-          <Text style={styles.blockLabel}>글꼴</Text>
-          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.fontRow}>
-            {DECOR_FONTS.map((font) => {
-              const active = font.id === fontId;
-              return (
-                <Pressable
-                  key={font.id}
-                  onPress={() => {
-                    setFontId(font.id);
-                    markDirty();
-                  }}
-                  style={[styles.fontChip, active && styles.fontChipActive]}
-                >
-                  <Text style={[styles.fontChipText, font.style, active && styles.fontChipTextActive]}>
-                    {font.label}
-                  </Text>
-                </Pressable>
-              );
-            })}
-          </ScrollView>
-        </View>
+      {/* Bottom tools */}
+      {showChrome ? (
+        <SafeAreaView pointerEvents="box-none" style={styles.bottomSafe} edges={['bottom']}>
+          {selectedSticker ? (
+            <View style={styles.selectionBar}>
+              <Pressable style={styles.selectionChip} onPress={deleteSelectedSticker}>
+                <Ionicons name="trash-outline" size={18} color={colors.white} />
+                <Text style={styles.selectionChipText}>삭제</Text>
+              </Pressable>
+              <Text style={styles.selectionHint}>핀치로 크기 · 두 손가락으로 회전</Text>
+            </View>
+          ) : null}
 
-        <View style={styles.block}>
-          <Text style={styles.blockLabel}>스티커</Text>
-          <View style={styles.stickerRow}>
+          <View style={styles.toolBar}>
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel="텍스트"
+              onPress={openTextTool}
+              style={({ pressed }) => [styles.toolItem, pressed && styles.pressed]}
+            >
+              <Text style={styles.toolAa}>Aa</Text>
+              <Text style={styles.toolLabel}>텍스트</Text>
+            </Pressable>
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel="스티커"
+              onPress={openStickerTool}
+              style={({ pressed }) => [styles.toolItem, pressed && styles.pressed]}
+            >
+              <Ionicons name="happy-outline" size={26} color={colors.white} />
+              <Text style={styles.toolLabel}>스티커</Text>
+            </Pressable>
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel="더보기"
+              onPress={() => setSheet('more')}
+              style={({ pressed }) => [styles.toolItem, pressed && styles.pressed]}
+            >
+              <Ionicons name="ellipsis-horizontal" size={26} color={colors.white} />
+              <Text style={styles.toolLabel}>더보기</Text>
+            </Pressable>
+          </View>
+        </SafeAreaView>
+      ) : null}
+
+      {/* Sticker sheet */}
+      <Modal visible={sheet === 'sticker'} transparent animationType="slide" onRequestClose={() => setSheet('none')}>
+        <Pressable style={styles.sheetBackdrop} onPress={() => setSheet('none')} />
+        <View style={[styles.sheet, { paddingBottom: Math.max(insets.bottom, 16) }]}>
+          <View style={styles.sheetHandle} />
+          <Text style={styles.sheetTitle}>스티커</Text>
+          <ScrollView contentContainerStyle={styles.stickerGrid} showsVerticalScrollIndicator={false}>
             {DECOR_STICKER_EMOJIS.map((emoji) => (
               <Pressable
                 key={emoji}
-                onPress={() => {
-                  const sticker: DecorSticker = {
-                    id: createStickerId('record'),
-                    emoji,
-                    x: 0.5,
-                    y: 0.45,
-                    scale: 1,
-                    rotation: 0,
-                  };
-                  setStickers((prev) => [...prev, sticker]);
-                  setSelectedStickerId(sticker.id);
-                  markDirty();
-                }}
-                style={({ pressed }) => [styles.stickerAdd, pressed && styles.pressed]}
+                onPress={() => addSticker(emoji)}
+                style={({ pressed }) => [styles.stickerCell, pressed && styles.pressed]}
               >
-                <Text style={styles.stickerAddText}>{emoji}</Text>
+                <Text style={styles.stickerCellText}>{emoji}</Text>
               </Pressable>
             ))}
-          </View>
-
-          {selectedSticker ? (
-            <View style={styles.toolRow}>
-              <Pressable
-                style={styles.toolButton}
-                onPress={() => {
-                  setStickers((prev) =>
-                    prev.map((item) =>
-                      item.id === selectedSticker.id
-                        ? { ...item, rotation: item.rotation - 15 }
-                        : item,
-                    ),
-                  );
-                  markDirty();
-                }}
-              >
-                <Text style={styles.toolButtonText}>↺</Text>
-              </Pressable>
-              <Pressable
-                style={styles.toolButton}
-                onPress={() => {
-                  setStickers((prev) =>
-                    prev.map((item) =>
-                      item.id === selectedSticker.id
-                        ? { ...item, rotation: item.rotation + 15 }
-                        : item,
-                    ),
-                  );
-                  markDirty();
-                }}
-              >
-                <Text style={styles.toolButtonText}>↻</Text>
-              </Pressable>
-              <Pressable
-                style={[styles.toolButton, styles.toolDanger]}
-                onPress={() => {
-                  setStickers((prev) => prev.filter((item) => item.id !== selectedSticker.id));
-                  setSelectedStickerId(null);
-                  markDirty();
-                }}
-              >
-                <Text style={[styles.toolButtonText, styles.toolDangerText]}>삭제</Text>
-              </Pressable>
-            </View>
-          ) : (
-            <Text style={styles.hint}>스티커를 추가한 뒤 드래그·핀치·회전으로 배치하세요</Text>
-          )}
+          </ScrollView>
         </View>
+      </Modal>
 
-        <Pressable
-          accessibilityRole="button"
-          onPress={handleDelete}
-          style={({ pressed }) => [styles.deleteButton, pressed && styles.pressed]}
+      {/* Text sheet */}
+      <Modal visible={sheet === 'text'} transparent animationType="fade" onRequestClose={() => setSheet('none')}>
+        <KeyboardAvoidingView
+          style={styles.textModalRoot}
+          behavior={Platform.OS === 'ios' ? 'padding' : undefined}
         >
-          <Text style={styles.deleteButtonText}>이 기록 삭제</Text>
-        </Pressable>
-      </ScrollView>
-    </SafeAreaView>
+          <Pressable
+            style={styles.textModalDim}
+            onPress={() => {
+              setSheet('none');
+              if (!note.trim()) {
+                setTextSelected(false);
+              }
+            }}
+          />
+          <SafeAreaView edges={['top']} style={styles.textModalTop}>
+            <Pressable
+              onPress={() => {
+                setSheet('none');
+                if (!note.trim()) {
+                  setTextSelected(false);
+                }
+              }}
+              style={styles.doneButton}
+            >
+              <Text style={styles.doneButtonText}>완료</Text>
+            </Pressable>
+          </SafeAreaView>
+          <View style={styles.textComposer}>
+            <TextInput
+              value={note}
+              onChangeText={(text) => {
+                setNote(text);
+                markDirty();
+              }}
+              placeholder="짧은 기록을 남겨 보세요"
+              placeholderTextColor="rgba(255,255,255,0.45)"
+              style={[styles.textInput, getFontInputStyle(fontId)]}
+              multiline
+              autoFocus
+              maxLength={80}
+            />
+          </View>
+          <SafeAreaView edges={['bottom']} style={styles.fontBarWrap}>
+            <ScrollView
+              horizontal
+              showsHorizontalScrollIndicator={false}
+              contentContainerStyle={styles.fontBar}
+              keyboardShouldPersistTaps="handled"
+            >
+              {DECOR_FONTS.map((font) => {
+                const active = font.id === fontId;
+                return (
+                  <Pressable
+                    key={font.id}
+                    onPress={() => {
+                      setFontId(font.id);
+                      markDirty();
+                    }}
+                    style={[styles.fontChip, active && styles.fontChipActive]}
+                  >
+                    <Text style={[styles.fontChipText, font.style, active && styles.fontChipTextActive]}>
+                      {font.label}
+                    </Text>
+                  </Pressable>
+                );
+              })}
+            </ScrollView>
+          </SafeAreaView>
+        </KeyboardAvoidingView>
+      </Modal>
+
+      {/* More sheet */}
+      <Modal visible={sheet === 'more'} transparent animationType="fade" onRequestClose={() => setSheet('none')}>
+        <Pressable style={styles.sheetBackdrop} onPress={() => setSheet('none')} />
+        <View style={[styles.moreSheet, { paddingBottom: Math.max(insets.bottom, 16) }]}>
+          <Text style={styles.moreHint}>편집 중에는 사진·영상 원본을 바꾸거나 재촬영할 수 없어요.</Text>
+          <Pressable
+            onPress={handleDeleteRecord}
+            style={({ pressed }) => [styles.moreDanger, pressed && styles.pressed]}
+          >
+            <Ionicons name="trash-outline" size={18} color={colors.danger} />
+            <Text style={styles.moreDangerText}>이 기록 삭제</Text>
+          </Pressable>
+          <Pressable onPress={() => setSheet('none')} style={styles.moreCancel}>
+            <Text style={styles.moreCancelText}>닫기</Text>
+          </Pressable>
+        </View>
+      </Modal>
+    </View>
   );
 }
 
+function getFontInputStyle(fontId: DecorFontId) {
+  return DECOR_FONTS.find((font) => font.id === fontId)?.style;
+}
+
 const styles = StyleSheet.create({
+  root: {
+    flex: 1,
+    backgroundColor: colors.black,
+  },
   safe: {
     flex: 1,
-    backgroundColor: colors.background,
-  },
-  header: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: spacing.lg,
-    paddingTop: spacing.sm,
-    paddingBottom: spacing.md,
-    gap: spacing.sm,
-  },
-  headerCopy: {
-    flex: 1,
-    gap: 2,
-  },
-  headerTitle: {
-    ...typography.brandTitle,
-    fontSize: 18,
-    color: colors.ink,
-  },
-  headerSubtitle: {
-    ...typography.body,
-    fontSize: 12,
-    color: colors.inkMuted,
-  },
-  saveChip: {
-    minHeight: 36,
-    paddingHorizontal: spacing.md,
-    borderRadius: radii.pill,
     backgroundColor: colors.black,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  saveChipText: {
-    ...typography.label,
-    color: colors.white,
-  },
-  content: {
-    paddingHorizontal: spacing.xl,
-    paddingBottom: spacing.xxl,
-    gap: spacing.lg,
-  },
-  lockHint: {
-    ...typography.body,
-    fontSize: 12,
-    color: colors.inkMuted,
-  },
-  navRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    gap: spacing.sm,
-  },
-  navButton: {
-    minHeight: 40,
-    paddingHorizontal: spacing.md,
-    borderRadius: radii.pill,
-    backgroundColor: colors.white,
-    borderWidth: 1,
-    borderColor: colors.border,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  navDisabled: {
-    opacity: 0.4,
-  },
-  navButtonText: {
-    ...typography.label,
-    color: colors.ink,
-  },
-  navIndex: {
-    ...typography.monoBody,
-    color: colors.inkSoft,
-  },
-  block: {
-    gap: spacing.sm,
-  },
-  blockLabel: {
-    ...typography.label,
-    color: colors.ink,
-  },
-  noteInput: {
-    minHeight: 72,
-    borderRadius: radii.md,
-    backgroundColor: colors.white,
-    paddingHorizontal: spacing.lg,
-    paddingVertical: spacing.md,
-    color: colors.ink,
-    fontSize: 15,
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: colors.border,
-    textAlignVertical: 'top',
-  },
-  fontRow: {
-    gap: spacing.sm,
-    paddingVertical: 2,
-  },
-  fontChip: {
-    minHeight: 40,
-    paddingHorizontal: spacing.md,
-    borderRadius: radii.md,
-    borderWidth: 1,
-    borderColor: colors.border,
-    backgroundColor: colors.white,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  fontChipActive: {
-    borderColor: colors.black,
-    backgroundColor: colors.black,
-  },
-  fontChipText: {
-    fontSize: 14,
-    color: colors.ink,
-  },
-  fontChipTextActive: {
-    color: colors.white,
-  },
-  stickerRow: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: spacing.sm,
-  },
-  stickerAdd: {
-    width: 44,
-    height: 44,
-    borderRadius: radii.sm,
-    backgroundColor: colors.white,
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: colors.border,
-  },
-  stickerAddText: {
-    fontSize: 22,
-  },
-  toolRow: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: spacing.sm,
-    marginTop: spacing.xs,
-  },
-  toolButton: {
-    minHeight: 36,
-    paddingHorizontal: spacing.md,
-    borderRadius: radii.pill,
-    backgroundColor: colors.white,
-    borderWidth: 1,
-    borderColor: colors.border,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  toolButtonText: {
-    ...typography.label,
-    color: colors.ink,
-  },
-  toolDanger: {
-    borderColor: colors.danger,
-  },
-  toolDangerText: {
-    color: colors.danger,
-  },
-  hint: {
-    ...typography.body,
-    fontSize: 13,
-    color: colors.inkMuted,
-  },
-  deleteButton: {
-    minHeight: 48,
-    borderRadius: radii.md,
-    borderWidth: 1,
-    borderColor: colors.danger,
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginTop: spacing.sm,
-  },
-  deleteButtonText: {
-    ...typography.button,
-    color: colors.danger,
   },
   centered: {
     flex: 1,
     alignItems: 'center',
     justifyContent: 'center',
+    gap: spacing.md,
   },
   emptyText: {
     ...typography.body,
-    color: colors.inkMuted,
+    color: 'rgba(255,255,255,0.7)',
+  },
+  topSafe: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+  },
+  topBar: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: spacing.md,
+    paddingTop: spacing.xs,
+    gap: spacing.sm,
+  },
+  iconCircle: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'rgba(0,0,0,0.35)',
+  },
+  topMeta: {
+    flex: 1,
+    alignItems: 'center',
+    gap: 2,
+  },
+  topTitle: {
+    ...typography.label,
+    color: colors.white,
+    fontSize: 14,
+    textShadowColor: 'rgba(0,0,0,0.45)',
+    textShadowOffset: { width: 0, height: 1 },
+    textShadowRadius: 3,
+  },
+  topSubtitle: {
+    ...typography.body,
+    fontSize: 11,
+    color: 'rgba(255,255,255,0.75)',
+  },
+  doneButton: {
+    minHeight: 36,
+    paddingHorizontal: 14,
+    borderRadius: radii.pill,
+    backgroundColor: colors.white,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  doneButtonText: {
+    ...typography.label,
+    color: colors.black,
+  },
+  sideNav: {
+    position: 'absolute',
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: 'rgba(0,0,0,0.35)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  sideNavLeft: {
+    left: 10,
+  },
+  sideNavRight: {
+    right: 10,
+  },
+  sideNavDisabled: {
+    opacity: 0.25,
+  },
+  trashZone: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    bottom: 0,
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+    paddingTop: 28,
+    backgroundColor: 'rgba(0,0,0,0.45)',
+  },
+  trashZoneHot: {
+    backgroundColor: 'rgba(214,69,69,0.72)',
+  },
+  trashText: {
+    ...typography.label,
+    color: colors.white,
+    fontSize: 13,
+  },
+  bottomSafe: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    bottom: 0,
+  },
+  selectionBar: {
+    alignItems: 'center',
+    gap: 8,
+    marginBottom: spacing.sm,
+  },
+  selectionChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    paddingHorizontal: 14,
+    minHeight: 36,
+    borderRadius: radii.pill,
+    backgroundColor: 'rgba(0,0,0,0.45)',
+  },
+  selectionChipText: {
+    ...typography.label,
+    color: colors.white,
+  },
+  selectionHint: {
+    ...typography.body,
+    fontSize: 11,
+    color: 'rgba(255,255,255,0.7)',
+  },
+  toolBar: {
+    flexDirection: 'row',
+    justifyContent: 'space-evenly',
+    alignItems: 'center',
+    paddingHorizontal: spacing.lg,
+    paddingBottom: spacing.sm,
+    paddingTop: spacing.xs,
+  },
+  toolItem: {
+    alignItems: 'center',
+    gap: 4,
+    minWidth: 64,
+  },
+  toolAa: {
+    fontSize: 24,
+    fontWeight: '700',
+    color: colors.white,
+    lineHeight: 28,
+  },
+  toolLabel: {
+    ...typography.body,
+    fontSize: 11,
+    color: 'rgba(255,255,255,0.85)',
+  },
+  sheetBackdrop: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: 'rgba(0,0,0,0.45)',
+  },
+  sheet: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    bottom: 0,
+    maxHeight: '52%',
+    backgroundColor: '#1C1C1E',
+    borderTopLeftRadius: 20,
+    borderTopRightRadius: 20,
+    paddingTop: spacing.sm,
+    paddingHorizontal: spacing.lg,
+  },
+  sheetHandle: {
+    alignSelf: 'center',
+    width: 36,
+    height: 4,
+    borderRadius: 2,
+    backgroundColor: 'rgba(255,255,255,0.28)',
+    marginBottom: spacing.md,
+  },
+  sheetTitle: {
+    ...typography.label,
+    color: colors.white,
+    marginBottom: spacing.md,
+  },
+  stickerGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: spacing.sm,
+    paddingBottom: spacing.lg,
+  },
+  stickerCell: {
+    width: 52,
+    height: 52,
+    borderRadius: 12,
+    backgroundColor: 'rgba(255,255,255,0.08)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  stickerCellText: {
+    fontSize: 28,
+  },
+  textModalRoot: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.72)',
+  },
+  textModalDim: {
+    ...StyleSheet.absoluteFillObject,
+  },
+  textModalTop: {
+    alignItems: 'flex-end',
+    paddingHorizontal: spacing.lg,
+    paddingTop: spacing.sm,
+  },
+  textComposer: {
+    flex: 1,
+    justifyContent: 'center',
+    paddingHorizontal: spacing.xl,
+  },
+  textInput: {
+    color: colors.white,
+    fontSize: 28,
+    lineHeight: 36,
+    textAlign: 'center',
+    minHeight: 80,
+  },
+  fontBarWrap: {
+    backgroundColor: 'rgba(0,0,0,0.35)',
+  },
+  fontBar: {
+    gap: spacing.sm,
+    paddingHorizontal: spacing.lg,
+    paddingVertical: spacing.md,
+  },
+  fontChip: {
+    minHeight: 40,
+    paddingHorizontal: spacing.md,
+    borderRadius: radii.pill,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.28)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  fontChipActive: {
+    backgroundColor: colors.white,
+    borderColor: colors.white,
+  },
+  fontChipText: {
+    fontSize: 14,
+    color: colors.white,
+  },
+  fontChipTextActive: {
+    color: colors.black,
+  },
+  moreSheet: {
+    position: 'absolute',
+    left: spacing.lg,
+    right: spacing.lg,
+    bottom: spacing.lg,
+    borderRadius: 16,
+    backgroundColor: '#1C1C1E',
+    padding: spacing.lg,
+    gap: spacing.md,
+  },
+  moreHint: {
+    ...typography.body,
+    fontSize: 13,
+    color: 'rgba(255,255,255,0.65)',
+    lineHeight: 18,
+  },
+  moreDanger: {
+    minHeight: 48,
+    borderRadius: 12,
+    backgroundColor: 'rgba(214,69,69,0.15)',
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+  },
+  moreDangerText: {
+    ...typography.button,
+    color: colors.danger,
+  },
+  moreCancel: {
+    minHeight: 44,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  moreCancelText: {
+    ...typography.label,
+    color: 'rgba(255,255,255,0.8)',
   },
   pressed: {
-    opacity: 0.88,
+    opacity: 0.85,
   },
 });
