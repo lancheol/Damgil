@@ -61,6 +61,7 @@ export function DiaryRecordDecorateScreen({ navigation, route }: Props) {
   const [fontId, setFontId] = useState<DecorFontId>(initial.fontId);
   const [stickers, setStickers] = useState<DecorSticker[]>(initial.stickers);
   const [selectedStickerId, setSelectedStickerId] = useState<string | null>(null);
+  const [draggingSticker, setDraggingSticker] = useState(false);
   const [dirty, setDirty] = useState(false);
 
   useEffect(() => {
@@ -72,6 +73,7 @@ export function DiaryRecordDecorateScreen({ navigation, route }: Props) {
     setFontId(next.fontId);
     setStickers(next.stickers);
     setSelectedStickerId(null);
+    setDraggingSticker(false);
     setDirty(false);
   }, [photoId, photo?.decoration?.updatedAt, photo?.id]);
 
@@ -206,6 +208,7 @@ export function DiaryRecordDecorateScreen({ navigation, route }: Props) {
         contentContainerStyle={styles.content}
         keyboardShouldPersistTaps="handled"
         showsVerticalScrollIndicator={false}
+        scrollEnabled={!draggingSticker}
       >
         <RecordDecorCanvas
           uri={photo.uri}
@@ -215,8 +218,13 @@ export function DiaryRecordDecorateScreen({ navigation, route }: Props) {
           stickers={stickers}
           selectedStickerId={selectedStickerId}
           onSelectSticker={setSelectedStickerId}
+          onStickerDragChange={setDraggingSticker}
           onMoveSticker={(id, x, y) => {
             setStickers((prev) => prev.map((item) => (item.id === id ? { ...item, x, y } : item)));
+            markDirty();
+          }}
+          onScaleSticker={(id, scale) => {
+            setStickers((prev) => prev.map((item) => (item.id === id ? { ...item, scale } : item)));
             markDirty();
           }}
         />
@@ -315,36 +323,6 @@ export function DiaryRecordDecorateScreen({ navigation, route }: Props) {
                   setStickers((prev) =>
                     prev.map((item) =>
                       item.id === selectedSticker.id
-                        ? { ...item, scale: Math.max(0.6, item.scale - 0.15) }
-                        : item,
-                    ),
-                  );
-                  markDirty();
-                }}
-              >
-                <Text style={styles.toolButtonText}>축소</Text>
-              </Pressable>
-              <Pressable
-                style={styles.toolButton}
-                onPress={() => {
-                  setStickers((prev) =>
-                    prev.map((item) =>
-                      item.id === selectedSticker.id
-                        ? { ...item, scale: Math.min(2.2, item.scale + 0.15) }
-                        : item,
-                    ),
-                  );
-                  markDirty();
-                }}
-              >
-                <Text style={styles.toolButtonText}>확대</Text>
-              </Pressable>
-              <Pressable
-                style={styles.toolButton}
-                onPress={() => {
-                  setStickers((prev) =>
-                    prev.map((item) =>
-                      item.id === selectedSticker.id
                         ? { ...item, rotation: item.rotation - 15 }
                         : item,
                     ),
@@ -381,7 +359,7 @@ export function DiaryRecordDecorateScreen({ navigation, route }: Props) {
               </Pressable>
             </View>
           ) : (
-            <Text style={styles.hint}>스티커를 추가한 뒤 드래그해 배치하세요</Text>
+            <Text style={styles.hint}>스티커를 추가한 뒤 드래그·핀치로 배치하세요</Text>
           )}
         </View>
 

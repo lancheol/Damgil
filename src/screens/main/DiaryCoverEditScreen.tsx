@@ -46,6 +46,7 @@ export function DiaryCoverEditScreen({ navigation, route }: Props) {
   const [coverPhotoId, setCoverPhotoId] = useState<string | null>(initial.coverPhotoId);
   const [stickers, setStickers] = useState<CoverSticker[]>(initial.stickers);
   const [selectedStickerId, setSelectedStickerId] = useState<string | null>(null);
+  const [draggingSticker, setDraggingSticker] = useState(false);
   const [dirty, setDirty] = useState(false);
 
   const markDirty = useCallback(() => setDirty(true), []);
@@ -182,6 +183,7 @@ export function DiaryCoverEditScreen({ navigation, route }: Props) {
         contentContainerStyle={styles.content}
         keyboardShouldPersistTaps="handled"
         showsVerticalScrollIndicator={false}
+        scrollEnabled={!draggingSticker}
       >
         <CoverCanvas
           imageUri={previewUri}
@@ -191,8 +193,13 @@ export function DiaryCoverEditScreen({ navigation, route }: Props) {
           selectedStickerId={selectedStickerId}
           editable
           onSelectSticker={setSelectedStickerId}
+          onStickerDragChange={setDraggingSticker}
           onMoveSticker={(id, x, y) => {
             setStickers((prev) => prev.map((item) => (item.id === id ? { ...item, x, y } : item)));
+            markDirty();
+          }}
+          onScaleSticker={(id, scale) => {
+            setStickers((prev) => prev.map((item) => (item.id === id ? { ...item, scale } : item)));
             markDirty();
           }}
         />
@@ -287,20 +294,8 @@ export function DiaryCoverEditScreen({ navigation, route }: Props) {
 
           {selectedSticker ? (
             <View style={styles.stickerTools}>
-              <Text style={styles.toolHint}>선택 스티커</Text>
+              <Text style={styles.toolHint}>두 손가락으로 크기 조절 · 버튼으로 회전/삭제</Text>
               <View style={styles.toolRow}>
-                <Pressable
-                  style={styles.toolButton}
-                  onPress={() => updateSelected({ scale: Math.max(0.6, selectedSticker.scale - 0.15) })}
-                >
-                  <Text style={styles.toolButtonText}>축소</Text>
-                </Pressable>
-                <Pressable
-                  style={styles.toolButton}
-                  onPress={() => updateSelected({ scale: Math.min(2.2, selectedSticker.scale + 0.15) })}
-                >
-                  <Text style={styles.toolButtonText}>확대</Text>
-                </Pressable>
                 <Pressable
                   style={styles.toolButton}
                   onPress={() => updateSelected({ rotation: selectedSticker.rotation - 15 })}
@@ -326,7 +321,7 @@ export function DiaryCoverEditScreen({ navigation, route }: Props) {
               </View>
             </View>
           ) : (
-            <Text style={styles.toolHint}>스티커를 추가한 뒤 드래그해 배치하세요</Text>
+            <Text style={styles.toolHint}>스티커를 추가한 뒤 드래그·핀치로 배치하세요</Text>
           )}
         </View>
       </ScrollView>
