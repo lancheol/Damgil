@@ -202,6 +202,10 @@ export function DiaryCoverEditScreen({ navigation, route }: Props) {
             setStickers((prev) => prev.map((item) => (item.id === id ? { ...item, scale } : item)));
             markDirty();
           }}
+          onRotateSticker={(id, rotation) => {
+            setStickers((prev) => prev.map((item) => (item.id === id ? { ...item, rotation } : item)));
+            markDirty();
+          }}
         />
 
         <View style={styles.block}>
@@ -294,7 +298,7 @@ export function DiaryCoverEditScreen({ navigation, route }: Props) {
 
           {selectedSticker ? (
             <View style={styles.stickerTools}>
-              <Text style={styles.toolHint}>두 손가락으로 크기 조절 · 버튼으로 회전/삭제</Text>
+              <Text style={styles.toolHint}>두 손가락으로 크기·회전 · 버튼으로 미세 회전/삭제</Text>
               <View style={styles.toolRow}>
                 <Pressable
                   style={styles.toolButton}
@@ -321,7 +325,7 @@ export function DiaryCoverEditScreen({ navigation, route }: Props) {
               </View>
             </View>
           ) : (
-            <Text style={styles.toolHint}>스티커를 추가한 뒤 드래그·핀치로 배치하세요</Text>
+            <Text style={styles.toolHint}>스티커를 추가한 뒤 드래그·핀치·회전으로 배치하세요</Text>
           )}
         </View>
       </ScrollView>

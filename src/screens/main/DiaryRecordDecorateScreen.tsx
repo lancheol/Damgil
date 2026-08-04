@@ -227,6 +227,10 @@ export function DiaryRecordDecorateScreen({ navigation, route }: Props) {
             setStickers((prev) => prev.map((item) => (item.id === id ? { ...item, scale } : item)));
             markDirty();
           }}
+          onRotateSticker={(id, rotation) => {
+            setStickers((prev) => prev.map((item) => (item.id === id ? { ...item, rotation } : item)));
+            markDirty();
+          }}
         />
 
         <Text style={styles.lockHint}>편집 단계에서는 사진·영상 원본을 바꾸거나 재촬영할 수 없어요.</Text>
@@ -359,7 +363,7 @@ export function DiaryRecordDecorateScreen({ navigation, route }: Props) {
               </Pressable>
             </View>
           ) : (
-            <Text style={styles.hint}>스티커를 추가한 뒤 드래그·핀치로 배치하세요</Text>
+            <Text style={styles.hint}>스티커를 추가한 뒤 드래그·핀치·회전으로 배치하세요</Text>
           )}
         </View>
 

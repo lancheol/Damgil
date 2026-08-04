@@ -23,6 +23,7 @@ type RecordDecorCanvasProps = {
   onSelectSticker?: (id: string | null) => void;
   onMoveSticker?: (id: string, x: number, y: number) => void;
   onScaleSticker?: (id: string, scale: number) => void;
+  onRotateSticker?: (id: string, rotation: number) => void;
   onStickerDragChange?: (dragging: boolean) => void;
 };
 
@@ -37,6 +38,7 @@ export function RecordDecorCanvas({
   onSelectSticker,
   onMoveSticker,
   onScaleSticker,
+  onRotateSticker,
   onStickerDragChange,
 }: RecordDecorCanvasProps) {
   const layoutRef = useRef({ width: 1, height: 1 });
@@ -47,9 +49,15 @@ export function RecordDecorCanvas({
   const pinchHandlers = useCanvasPinchHandlers({
     enabled: true,
     selectedStickerId,
-    getSelectedScale: () =>
-      stickersRef.current.find((item) => item.id === selectedStickerId)?.scale ?? 1,
+    getSelectedTransform: () => {
+      const selected = stickersRef.current.find((item) => item.id === selectedStickerId);
+      return {
+        scale: selected?.scale ?? 1,
+        rotation: selected?.rotation ?? 0,
+      };
+    },
     onScale: (id, scale) => onScaleSticker?.(id, scale),
+    onRotate: (id, rotation) => onRotateSticker?.(id, rotation),
     onDragChange: onStickerDragChange,
   });
 
@@ -90,6 +98,7 @@ export function RecordDecorCanvas({
           onSelect={() => onSelectSticker?.(sticker.id)}
           onMove={(x, y) => onMoveSticker?.(sticker.id, x, y)}
           onScale={(scale) => onScaleSticker?.(sticker.id, scale)}
+          onRotate={(rotation) => onRotateSticker?.(sticker.id, rotation)}
           onDragChange={onStickerDragChange}
         />
       ))}

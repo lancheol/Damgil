@@ -22,6 +22,7 @@ type DraggableStickerProps = {
   onSelect: () => void;
   onMove: (x: number, y: number) => void;
   onScale: (scale: number) => void;
+  onRotate: (rotation: number) => void;
   onDragChange?: (dragging: boolean) => void;
 };
 
@@ -34,8 +35,40 @@ function touchDistance(touches: NativeTouchEvent[]): number {
   return Math.hypot(dx, dy) || 1;
 }
 
+/** 두 손가락 사이 각도 (deg) */
+function touchAngle(touches: NativeTouchEvent[]): number {
+  if (touches.length < 2) {
+    return 0;
+  }
+  const dx = touches[1].pageX - touches[0].pageX;
+  const dy = touches[1].pageY - touches[0].pageY;
+  return (Math.atan2(dy, dx) * 180) / Math.PI;
+}
+
+function shortestAngleDelta(from: number, to: number): number {
+  let delta = to - from;
+  while (delta > 180) {
+    delta -= 360;
+  }
+  while (delta < -180) {
+    delta += 360;
+  }
+  return delta;
+}
+
 export function clampStickerScale(scale: number): number {
   return Math.min(STICKER_SCALE_MAX, Math.max(STICKER_SCALE_MIN, scale));
+}
+
+export function normalizeRotation(rotation: number): number {
+  let next = rotation % 360;
+  if (next > 180) {
+    next -= 360;
+  }
+  if (next < -180) {
+    next += 360;
+  }
+  return next;
 }
 
 export function DraggableSticker({
@@ -46,6 +79,7 @@ export function DraggableSticker({
   onSelect,
   onMove,
   onScale,
+  onRotate,
   onDragChange,
 }: DraggableStickerProps) {
   const stickerRef = useRef(sticker);
@@ -55,20 +89,37 @@ export function DraggableSticker({
   const lastPageRef = useRef({ x: 0, y: 0 });
   const pinchStartDistRef = useRef(1);
   const pinchStartScaleRef = useRef(1);
+  const pinchStartAngleRef = useRef(0);
+  const pinchStartRotationRef = useRef(0);
 
   const onSelectRef = useRef(onSelect);
   const onMoveRef = useRef(onMove);
   const onScaleRef = useRef(onScale);
+  const onRotateRef = useRef(onRotate);
   const onDragChangeRef = useRef(onDragChange);
   onSelectRef.current = onSelect;
   onMoveRef.current = onMove;
   onScaleRef.current = onScale;
+  onRotateRef.current = onRotate;
   onDragChangeRef.current = onDragChange;
 
   const beginPinch = (touches: NativeTouchEvent[]) => {
     modeRef.current = 'pinch';
     pinchStartDistRef.current = touchDistance(touches);
     pinchStartScaleRef.current = stickerRef.current.scale;
+    pinchStartAngleRef.current = touchAngle(touches);
+    pinchStartRotationRef.current = stickerRef.current.rotation;
+  };
+
+  const applyPinch = (touches: NativeTouchEvent[]) => {
+    const dist = touchDistance(touches);
+    const nextScale = clampStickerScale(
+      pinchStartScaleRef.current * (dist / Math.max(pinchStartDistRef.current, 1)),
+    );
+    onScaleRef.current(nextScale);
+
+    const angleDelta = shortestAngleDelta(pinchStartAngleRef.current, touchAngle(touches));
+    onRotateRef.current(normalizeRotation(pinchStartRotationRef.current + angleDelta));
   };
 
   const panResponder = useRef(
@@ -98,11 +149,7 @@ export function DraggableSticker({
           if (modeRef.current !== 'pinch') {
             beginPinch(touches);
           }
-          const dist = touchDistance(touches);
-          const nextScale = clampStickerScale(
-            pinchStartScaleRef.current * (dist / Math.max(pinchStartDistRef.current, 1)),
-          );
-          onScaleRef.current(nextScale);
+          applyPinch(touches);
           return;
         }
 
@@ -132,13 +179,16 @@ export function DraggableSticker({
     }),
   ).current;
 
-  const hitSize = 96;
+  const emojiSize = 28;
+  const selectPad = 5;
+  const visualSize = emojiSize + selectPad * 2;
+  const hitSize = 72;
 
   return (
     <View
       {...(editable ? panResponder.panHandlers : {})}
       style={[
-        styles.sticker,
+        styles.stickerHit,
         {
           width: hitSize,
           height: hitSize,
@@ -148,42 +198,68 @@ export function DraggableSticker({
           marginTop: -hitSize / 2,
           transform: [{ scale: sticker.scale }, { rotate: `${sticker.rotation}deg` }],
         },
-        selected && editable ? styles.stickerSelected : null,
       ]}
     >
-      <Text style={styles.stickerEmoji}>{sticker.emoji}</Text>
+      <View
+        style={[
+          styles.stickerVisual,
+          {
+            width: visualSize,
+            height: visualSize,
+          },
+          selected && editable ? styles.stickerSelected : null,
+        ]}
+      >
+        <Text style={[styles.stickerEmoji, { fontSize: emojiSize }]}>{sticker.emoji}</Text>
+      </View>
     </View>
   );
 }
 
-/** 선택된 스티커를 캔버스 어디서든 핀치로 크기 조절 */
+/** 선택된 스티커를 캔버스 어디서든 핀치·회전 */
 export function useCanvasPinchHandlers({
   enabled,
   selectedStickerId,
-  getSelectedScale,
+  getSelectedTransform,
   onScale,
+  onRotate,
   onDragChange,
 }: {
   enabled: boolean;
   selectedStickerId: string | null;
-  getSelectedScale: () => number;
+  getSelectedTransform: () => { scale: number; rotation: number };
   onScale: (id: string, scale: number) => void;
+  onRotate: (id: string, rotation: number) => void;
   onDragChange?: (dragging: boolean) => void;
 }) {
   const selectedIdRef = useRef(selectedStickerId);
   const enabledRef = useRef(enabled);
-  const getScaleRef = useRef(getSelectedScale);
+  const getTransformRef = useRef(getSelectedTransform);
   const onScaleRef = useRef(onScale);
+  const onRotateRef = useRef(onRotate);
   const onDragChangeRef = useRef(onDragChange);
   selectedIdRef.current = selectedStickerId;
   enabledRef.current = enabled;
-  getScaleRef.current = getSelectedScale;
+  getTransformRef.current = getSelectedTransform;
   onScaleRef.current = onScale;
+  onRotateRef.current = onRotate;
   onDragChangeRef.current = onDragChange;
 
   const modeRef = useRef(false);
   const pinchStartDistRef = useRef(1);
   const pinchStartScaleRef = useRef(1);
+  const pinchStartAngleRef = useRef(0);
+  const pinchStartRotationRef = useRef(0);
+
+  const beginPinch = (touches: NativeTouchEvent[]) => {
+    modeRef.current = true;
+    const transform = getTransformRef.current();
+    pinchStartDistRef.current = touchDistance(touches);
+    pinchStartScaleRef.current = transform.scale;
+    pinchStartAngleRef.current = touchAngle(touches);
+    pinchStartRotationRef.current = transform.rotation;
+    onDragChangeRef.current?.(true);
+  };
 
   const panResponder = useRef(
     PanResponder.create({
@@ -199,10 +275,7 @@ export function useCanvasPinchHandlers({
         if (!id || touches.length < 2) {
           return;
         }
-        modeRef.current = true;
-        pinchStartDistRef.current = touchDistance(touches);
-        pinchStartScaleRef.current = getScaleRef.current();
-        onDragChangeRef.current?.(true);
+        beginPinch(touches);
       },
       onPanResponderMove: (event) => {
         const id = selectedIdRef.current;
@@ -211,16 +284,15 @@ export function useCanvasPinchHandlers({
           return;
         }
         if (!modeRef.current) {
-          modeRef.current = true;
-          pinchStartDistRef.current = touchDistance(touches);
-          pinchStartScaleRef.current = getScaleRef.current();
-          onDragChangeRef.current?.(true);
+          beginPinch(touches);
         }
         const dist = touchDistance(touches);
         onScaleRef.current(
           id,
           clampStickerScale(pinchStartScaleRef.current * (dist / Math.max(pinchStartDistRef.current, 1))),
         );
+        const angleDelta = shortestAngleDelta(pinchStartAngleRef.current, touchAngle(touches));
+        onRotateRef.current(id, normalizeRotation(pinchStartRotationRef.current + angleDelta));
       },
       onPanResponderRelease: () => {
         modeRef.current = false;
@@ -237,18 +309,23 @@ export function useCanvasPinchHandlers({
 }
 
 const styles = StyleSheet.create({
-  sticker: {
+  stickerHit: {
     position: 'absolute',
     alignItems: 'center',
     justifyContent: 'center',
   },
+  stickerVisual: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: 8,
+  },
   stickerSelected: {
     borderWidth: 1,
     borderColor: colors.white,
-    borderRadius: 12,
     backgroundColor: 'rgba(255,255,255,0.12)',
   },
   stickerEmoji: {
-    fontSize: 28,
+    lineHeight: 32,
+    textAlign: 'center',
   },
 });
