@@ -9,67 +9,100 @@ import {
 } from 'react-native';
 
 import { DraggableSticker, useCanvasPinchHandlers } from './DraggableSticker';
-import { DecorFontId, DecorSticker, DiaryMediaType } from '../../types/diary';
-import { getDecorFontStyle } from '../../utils/decorAssets';
+import { DraggableText } from './DraggableText';
+import { DecorSticker, DecorTextLayer, DiaryMediaType } from '../../types/diary';
 import { colors, typography } from '../../theme';
 
 type RecordDecorCanvasProps = {
   uri: string;
   mediaType?: DiaryMediaType;
-  note: string;
-  fontId: DecorFontId;
   stickers: DecorSticker[];
+  texts: DecorTextLayer[];
   selectedStickerId: string | null;
-  textSelected?: boolean;
+  selectedTextId: string | null;
   fullBleed?: boolean;
   style?: ViewStyle;
   onSelectSticker?: (id: string | null) => void;
-  onSelectText?: () => void;
+  onSelectText?: (id: string) => void;
+  onEditText?: (id: string) => void;
   onBackgroundPress?: () => void;
   onMoveSticker?: (id: string, x: number, y: number) => void;
   onScaleSticker?: (id: string, scale: number) => void;
   onRotateSticker?: (id: string, rotation: number) => void;
-  onStickerDragChange?: (dragging: boolean) => void;
-  onStickerDragEnd?: (id: string) => void;
+  onMoveText?: (id: string, x: number, y: number) => void;
+  onScaleText?: (id: string, scale: number) => void;
+  onRotateText?: (id: string, rotation: number) => void;
+  onLayerDragChange?: (dragging: boolean) => void;
+  onLayerDragPointer?: (pageX: number, pageY: number) => void;
+  onStickerDragEnd?: (id: string, pageX?: number, pageY?: number) => void;
+  onTextDragEnd?: (id: string, pageX?: number, pageY?: number) => void;
 };
 
 export function RecordDecorCanvas({
   uri,
   mediaType = 'photo',
-  note,
-  fontId,
   stickers,
+  texts,
   selectedStickerId,
-  textSelected = false,
+  selectedTextId,
   fullBleed = false,
   style,
   onSelectSticker,
   onSelectText,
+  onEditText,
   onBackgroundPress,
   onMoveSticker,
   onScaleSticker,
   onRotateSticker,
-  onStickerDragChange,
+  onMoveText,
+  onScaleText,
+  onRotateText,
+  onLayerDragChange,
+  onLayerDragPointer,
   onStickerDragEnd,
+  onTextDragEnd,
 }: RecordDecorCanvasProps) {
   const layoutRef = useRef({ width: 1, height: 1 });
   const isVideo = mediaType === 'video';
   const stickersRef = useRef(stickers);
+  const textsRef = useRef(texts);
   stickersRef.current = stickers;
+  textsRef.current = texts;
+
+  const selectedLayerId = selectedTextId ?? selectedStickerId;
 
   const pinchHandlers = useCanvasPinchHandlers({
     enabled: true,
-    selectedStickerId,
+    selectedStickerId: selectedLayerId,
     getSelectedTransform: () => {
-      const selected = stickersRef.current.find((item) => item.id === selectedStickerId);
+      if (selectedTextId) {
+        const text = textsRef.current.find((item) => item.id === selectedTextId);
+        return {
+          scale: text?.scale ?? 1,
+          rotation: text?.rotation ?? 0,
+        };
+      }
+      const sticker = stickersRef.current.find((item) => item.id === selectedStickerId);
       return {
-        scale: selected?.scale ?? 1,
-        rotation: selected?.rotation ?? 0,
+        scale: sticker?.scale ?? 1,
+        rotation: sticker?.rotation ?? 0,
       };
     },
-    onScale: (id, scale) => onScaleSticker?.(id, scale),
-    onRotate: (id, rotation) => onRotateSticker?.(id, rotation),
-    onDragChange: onStickerDragChange,
+    onScale: (id, scale) => {
+      if (textsRef.current.some((item) => item.id === id)) {
+        onScaleText?.(id, scale);
+        return;
+      }
+      onScaleSticker?.(id, scale);
+    },
+    onRotate: (id, rotation) => {
+      if (textsRef.current.some((item) => item.id === id)) {
+        onRotateText?.(id, rotation);
+        return;
+      }
+      onRotateSticker?.(id, rotation);
+    },
+    onDragChange: onLayerDragChange,
   });
 
   return (
@@ -93,19 +126,22 @@ export function RecordDecorCanvas({
         </View>
       ) : null}
 
-      {note.trim() || textSelected ? (
-        <Pressable
-          onPress={onSelectText}
-          style={[styles.noteHit, textSelected && styles.noteSelected]}
-        >
-          <Text
-            style={[styles.note, getDecorFontStyle(fontId)]}
-            numberOfLines={4}
-          >
-            {note.trim() || '문구를 입력하세요'}
-          </Text>
-        </Pressable>
-      ) : null}
+      {texts.map((layer) => (
+        <DraggableText
+          key={layer.id}
+          layer={layer}
+          selected={selectedTextId === layer.id}
+          layoutRef={layoutRef}
+          onSelect={() => onSelectText?.(layer.id)}
+          onEditRequest={() => onEditText?.(layer.id)}
+          onMove={(x, y) => onMoveText?.(layer.id, x, y)}
+          onScale={(scale) => onScaleText?.(layer.id, scale)}
+          onRotate={(rotation) => onRotateText?.(layer.id, rotation)}
+          onDragChange={onLayerDragChange}
+          onDragPointer={onLayerDragPointer}
+          onDragEnd={(pageX, pageY) => onTextDragEnd?.(layer.id, pageX, pageY)}
+        />
+      ))}
 
       {stickers.map((sticker) => (
         <DraggableSticker
@@ -117,8 +153,9 @@ export function RecordDecorCanvas({
           onMove={(x, y) => onMoveSticker?.(sticker.id, x, y)}
           onScale={(scale) => onScaleSticker?.(sticker.id, scale)}
           onRotate={(rotation) => onRotateSticker?.(sticker.id, rotation)}
-          onDragChange={onStickerDragChange}
-          onDragEnd={() => onStickerDragEnd?.(sticker.id)}
+          onDragChange={onLayerDragChange}
+          onDragPointer={onLayerDragPointer}
+          onDragEnd={(pageX, pageY) => onStickerDragEnd?.(sticker.id, pageX, pageY)}
         />
       ))}
     </View>
@@ -157,28 +194,5 @@ const styles = StyleSheet.create({
     fontSize: 10,
     color: colors.white,
     letterSpacing: 0.6,
-  },
-  noteHit: {
-    position: 'absolute',
-    left: 20,
-    right: 20,
-    bottom: '18%',
-    paddingHorizontal: 8,
-    paddingVertical: 6,
-    borderRadius: 8,
-  },
-  noteSelected: {
-    backgroundColor: 'rgba(255,255,255,0.12)',
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.55)',
-  },
-  note: {
-    fontSize: 22,
-    lineHeight: 30,
-    color: colors.white,
-    textAlign: 'center',
-    textShadowColor: 'rgba(0,0,0,0.55)',
-    textShadowOffset: { width: 0, height: 1 },
-    textShadowRadius: 5,
   },
 });

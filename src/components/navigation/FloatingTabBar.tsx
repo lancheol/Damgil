@@ -21,10 +21,22 @@ const TABS: TabConfig[] = [
     iconFocused: 'home',
   },
   {
+    routeName: 'AI',
+    label: 'AI',
+    icon: 'sparkles-outline',
+    iconFocused: 'sparkles',
+  },
+  {
     routeName: 'Search',
     label: 'Search',
     icon: 'search-outline',
     iconFocused: 'search',
+  },
+  {
+    routeName: 'Map',
+    label: 'Map',
+    icon: 'map-outline',
+    iconFocused: 'map',
   },
   {
     routeName: 'MyPage',
@@ -40,9 +52,11 @@ export function FloatingTabBar({ state, navigation }: BottomTabBarProps) {
   return (
     <View style={[styles.wrap, { paddingBottom: Math.max(insets.bottom, spacing.sm) }]}>
       <View style={styles.bar}>
-        {TABS.map((tab, index) => {
-          const isFocused = state.index === index;
+        {TABS.map((tab) => {
+          const routeIndex = state.routes.findIndex((route) => route.name === tab.routeName);
+          const isFocused = routeIndex >= 0 && state.index === routeIndex;
           const color = isFocused ? colors.accent : colors.inkMuted;
+          const route = state.routes[routeIndex];
 
           return (
             <Pressable
@@ -51,9 +65,13 @@ export function FloatingTabBar({ state, navigation }: BottomTabBarProps) {
               accessibilityState={isFocused ? { selected: true } : {}}
               accessibilityLabel={tab.label}
               onPress={() => {
+                if (routeIndex < 0 || !route) {
+                  return;
+                }
+
                 const event = navigation.emit({
                   type: 'tabPress',
-                  target: state.routes[index]?.key,
+                  target: route.key,
                   canPreventDefault: true,
                 });
 
@@ -65,10 +83,12 @@ export function FloatingTabBar({ state, navigation }: BottomTabBarProps) {
             >
               <Ionicons
                 name={isFocused ? tab.iconFocused : tab.icon}
-                size={22}
+                size={20}
                 color={color}
               />
-              <Text style={[styles.label, { color }]}>{tab.label}</Text>
+              <Text style={[styles.label, { color }]} numberOfLines={1}>
+                {tab.label}
+              </Text>
             </Pressable>
           );
         })}
@@ -84,18 +104,18 @@ const styles = StyleSheet.create({
     right: 0,
     bottom: 0,
     alignItems: 'center',
-    paddingHorizontal: spacing.xl,
+    paddingHorizontal: spacing.lg,
   },
   bar: {
     width: '100%',
-    maxWidth: 360,
+    maxWidth: 420,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
     backgroundColor: colors.white,
     borderRadius: radii.pill,
     paddingVertical: spacing.md,
-    paddingHorizontal: spacing.xl,
+    paddingHorizontal: spacing.md,
     shadowColor: colors.black,
     shadowOpacity: 0.14,
     shadowRadius: 16,
@@ -109,5 +129,6 @@ const styles = StyleSheet.create({
   },
   label: {
     ...typography.tabLabel,
+    fontSize: 10,
   },
 });

@@ -1,4 +1,4 @@
-import { MutableRefObject, useRef } from 'react';
+import { MutableRefObject, useRef, useState } from 'react';
 import {
   GestureResponderEvent,
   NativeTouchEvent,
@@ -8,14 +8,13 @@ import {
   View,
 } from 'react-native';
 
-import { DecorSticker } from '../../types/diary';
+import { clampStickerScale, normalizeRotation } from './DraggableSticker';
+import { DecorTextLayer } from '../../types/diary';
+import { getDecorFontStyle } from '../../utils/decorAssets';
 import { colors } from '../../theme';
 
-export const STICKER_SCALE_MIN = 0.5;
-export const STICKER_SCALE_MAX = 5;
-
-type DraggableStickerProps = {
-  sticker: DecorSticker;
+type DraggableTextProps = {
+  layer: DecorTextLayer;
   selected: boolean;
   editable?: boolean;
   layoutRef: MutableRefObject<{ width: number; height: number }>;
@@ -25,6 +24,7 @@ type DraggableStickerProps = {
   onRotate: (rotation: number) => void;
   onDragChange?: (dragging: boolean) => void;
   onDragEnd?: (pageX?: number, pageY?: number) => void;
+  onEditRequest?: () => void;
   onDragPointer?: (pageX: number, pageY: number) => void;
 };
 
@@ -37,7 +37,6 @@ function touchDistance(touches: NativeTouchEvent[]): number {
   return Math.hypot(dx, dy) || 1;
 }
 
-/** 두 손가락 사이 각도 (deg) */
 function touchAngle(touches: NativeTouchEvent[]): number {
   if (touches.length < 2) {
     return 0;
@@ -58,23 +57,8 @@ function shortestAngleDelta(from: number, to: number): number {
   return delta;
 }
 
-export function clampStickerScale(scale: number): number {
-  return Math.min(STICKER_SCALE_MAX, Math.max(STICKER_SCALE_MIN, scale));
-}
-
-export function normalizeRotation(rotation: number): number {
-  let next = rotation % 360;
-  if (next > 180) {
-    next -= 360;
-  }
-  if (next < -180) {
-    next += 360;
-  }
-  return next;
-}
-
-export function DraggableSticker({
-  sticker,
+export function DraggableText({
+  layer,
   selected,
   editable = true,
   layoutRef,
@@ -84,13 +68,16 @@ export function DraggableSticker({
   onRotate,
   onDragChange,
   onDragEnd,
+  onEditRequest,
   onDragPointer,
-}: DraggableStickerProps) {
-  const stickerRef = useRef(sticker);
-  stickerRef.current = sticker;
+}: DraggableTextProps) {
+  const layerRef = useRef(layer);
+  layerRef.current = layer;
+  const [box, setBox] = useState({ width: 120, height: 40 });
 
   const modeRef = useRef<'move' | 'pinch'>('move');
   const lastPageRef = useRef({ x: 0, y: 0 });
+  const movedRef = useRef(false);
   const pinchStartDistRef = useRef(1);
   const pinchStartScaleRef = useRef(1);
   const pinchStartAngleRef = useRef(0);
@@ -102,30 +89,33 @@ export function DraggableSticker({
   const onRotateRef = useRef(onRotate);
   const onDragChangeRef = useRef(onDragChange);
   const onDragEndRef = useRef(onDragEnd);
+  const onEditRequestRef = useRef(onEditRequest);
   const onDragPointerRef = useRef(onDragPointer);
+  const selectedRef = useRef(selected);
   onSelectRef.current = onSelect;
   onMoveRef.current = onMove;
   onScaleRef.current = onScale;
   onRotateRef.current = onRotate;
   onDragChangeRef.current = onDragChange;
   onDragEndRef.current = onDragEnd;
+  onEditRequestRef.current = onEditRequest;
   onDragPointerRef.current = onDragPointer;
+  selectedRef.current = selected;
 
   const beginPinch = (touches: NativeTouchEvent[]) => {
     modeRef.current = 'pinch';
+    movedRef.current = true;
     pinchStartDistRef.current = touchDistance(touches);
-    pinchStartScaleRef.current = stickerRef.current.scale;
+    pinchStartScaleRef.current = layerRef.current.scale;
     pinchStartAngleRef.current = touchAngle(touches);
-    pinchStartRotationRef.current = stickerRef.current.rotation;
+    pinchStartRotationRef.current = layerRef.current.rotation;
   };
 
   const applyPinch = (touches: NativeTouchEvent[]) => {
     const dist = touchDistance(touches);
-    const nextScale = clampStickerScale(
-      pinchStartScaleRef.current * (dist / Math.max(pinchStartDistRef.current, 1)),
+    onScaleRef.current(
+      clampStickerScale(pinchStartScaleRef.current * (dist / Math.max(pinchStartDistRef.current, 1))),
     );
-    onScaleRef.current(nextScale);
-
     const angleDelta = shortestAngleDelta(pinchStartAngleRef.current, touchAngle(touches));
     onRotateRef.current(normalizeRotation(pinchStartRotationRef.current + angleDelta));
   };
@@ -141,6 +131,7 @@ export function DraggableSticker({
       onPanResponderGrant: (event: GestureResponderEvent) => {
         const { touches, pageX, pageY } = event.nativeEvent;
         lastPageRef.current = { x: pageX, y: pageY };
+        movedRef.current = false;
         onDragChangeRef.current?.(true);
         onDragPointerRef.current?.(pageX, pageY);
         onSelectRef.current();
@@ -172,18 +163,26 @@ export function DraggableSticker({
         const { width, height } = layoutRef.current;
         const dx = (pageX - lastPageRef.current.x) / Math.max(width, 1);
         const dy = (pageY - lastPageRef.current.y) / Math.max(height, 1);
+        if (Math.abs(dx) > 0.002 || Math.abs(dy) > 0.002) {
+          movedRef.current = true;
+        }
         lastPageRef.current = { x: pageX, y: pageY };
 
-        const nextX = Math.min(0.92, Math.max(0.08, stickerRef.current.x + dx));
-        const nextY = Math.min(0.92, Math.max(0.08, stickerRef.current.y + dy));
+        const nextX = Math.min(0.92, Math.max(0.08, layerRef.current.x + dx));
+        const nextY = Math.min(0.92, Math.max(0.08, layerRef.current.y + dy));
         onMoveRef.current(nextX, nextY);
       },
       onPanResponderRelease: (event) => {
         const { pageX, pageY } = event.nativeEvent;
+        const wasSelected = selectedRef.current;
+        const didMove = movedRef.current;
         modeRef.current = 'move';
         onDragPointerRef.current?.(pageX, pageY);
         onDragEndRef.current?.(pageX, pageY);
         onDragChangeRef.current?.(false);
+        if (wasSelected && !didMove) {
+          onEditRequestRef.current?.();
+        }
       },
       onPanResponderTerminate: (event) => {
         const { pageX, pageY } = event.nativeEvent;
@@ -199,153 +198,68 @@ export function DraggableSticker({
     }),
   ).current;
 
-  const emojiSize = 28;
-  const selectPad = 5;
-  const visualSize = emojiSize + selectPad * 2;
-  const hitSize = 72;
+  const label = layer.content.trim() || '텍스트';
 
   return (
     <View
       {...(editable ? panResponder.panHandlers : {})}
+      onLayout={(event) => {
+        const { width, height } = event.nativeEvent.layout;
+        if (width > 0 && height > 0 && (width !== box.width || height !== box.height)) {
+          setBox({ width, height });
+        }
+      }}
       style={[
-        styles.stickerHit,
+        styles.hit,
         {
-          width: hitSize,
-          height: hitSize,
-          left: `${sticker.x * 100}%` as unknown as number,
-          top: `${sticker.y * 100}%` as unknown as number,
-          marginLeft: -hitSize / 2,
-          marginTop: -hitSize / 2,
-          transform: [{ scale: sticker.scale }, { rotate: `${sticker.rotation}deg` }],
+          left: `${layer.x * 100}%` as unknown as number,
+          top: `${layer.y * 100}%` as unknown as number,
+          marginLeft: -box.width / 2,
+          marginTop: -box.height / 2,
+          transform: [{ scale: layer.scale }, { rotate: `${layer.rotation}deg` }],
         },
       ]}
     >
-      <View
-        style={[
-          styles.stickerVisual,
-          {
-            width: visualSize,
-            height: visualSize,
-          },
-          selected && editable ? styles.stickerSelected : null,
-        ]}
-      >
-        <Text style={[styles.stickerEmoji, { fontSize: emojiSize }]}>{sticker.emoji}</Text>
+      <View style={[styles.visual, selected && editable ? styles.selected : null]}>
+        <Text
+          style={[
+            styles.text,
+            getDecorFontStyle(layer.fontId),
+            {
+              color: layer.color,
+              textShadowColor: layer.color === '#111111' ? 'rgba(255,255,255,0.35)' : 'rgba(0,0,0,0.55)',
+            },
+          ]}
+        >
+          {label}
+        </Text>
       </View>
     </View>
   );
 }
 
-/** 선택된 스티커를 캔버스 어디서든 핀치·회전 */
-export function useCanvasPinchHandlers({
-  enabled,
-  selectedStickerId,
-  getSelectedTransform,
-  onScale,
-  onRotate,
-  onDragChange,
-}: {
-  enabled: boolean;
-  selectedStickerId: string | null;
-  getSelectedTransform: () => { scale: number; rotation: number };
-  onScale: (id: string, scale: number) => void;
-  onRotate: (id: string, rotation: number) => void;
-  onDragChange?: (dragging: boolean) => void;
-}) {
-  const selectedIdRef = useRef(selectedStickerId);
-  const enabledRef = useRef(enabled);
-  const getTransformRef = useRef(getSelectedTransform);
-  const onScaleRef = useRef(onScale);
-  const onRotateRef = useRef(onRotate);
-  const onDragChangeRef = useRef(onDragChange);
-  selectedIdRef.current = selectedStickerId;
-  enabledRef.current = enabled;
-  getTransformRef.current = getSelectedTransform;
-  onScaleRef.current = onScale;
-  onRotateRef.current = onRotate;
-  onDragChangeRef.current = onDragChange;
-
-  const modeRef = useRef(false);
-  const pinchStartDistRef = useRef(1);
-  const pinchStartScaleRef = useRef(1);
-  const pinchStartAngleRef = useRef(0);
-  const pinchStartRotationRef = useRef(0);
-
-  const beginPinch = (touches: NativeTouchEvent[]) => {
-    modeRef.current = true;
-    const transform = getTransformRef.current();
-    pinchStartDistRef.current = touchDistance(touches);
-    pinchStartScaleRef.current = transform.scale;
-    pinchStartAngleRef.current = touchAngle(touches);
-    pinchStartRotationRef.current = transform.rotation;
-    onDragChangeRef.current?.(true);
-  };
-
-  const panResponder = useRef(
-    PanResponder.create({
-      onStartShouldSetPanResponder: (event) =>
-        Boolean(enabledRef.current && selectedIdRef.current && event.nativeEvent.touches.length >= 2),
-      onMoveShouldSetPanResponder: (event) =>
-        Boolean(enabledRef.current && selectedIdRef.current && event.nativeEvent.touches.length >= 2),
-      onPanResponderTerminationRequest: () => false,
-      onShouldBlockNativeResponder: () => true,
-      onPanResponderGrant: (event) => {
-        const id = selectedIdRef.current;
-        const touches = event.nativeEvent.touches;
-        if (!id || touches.length < 2) {
-          return;
-        }
-        beginPinch(touches);
-      },
-      onPanResponderMove: (event) => {
-        const id = selectedIdRef.current;
-        const touches = event.nativeEvent.touches;
-        if (!id || touches.length < 2) {
-          return;
-        }
-        if (!modeRef.current) {
-          beginPinch(touches);
-        }
-        const dist = touchDistance(touches);
-        onScaleRef.current(
-          id,
-          clampStickerScale(pinchStartScaleRef.current * (dist / Math.max(pinchStartDistRef.current, 1))),
-        );
-        const angleDelta = shortestAngleDelta(pinchStartAngleRef.current, touchAngle(touches));
-        onRotateRef.current(id, normalizeRotation(pinchStartRotationRef.current + angleDelta));
-      },
-      onPanResponderRelease: () => {
-        modeRef.current = false;
-        onDragChangeRef.current?.(false);
-      },
-      onPanResponderTerminate: () => {
-        modeRef.current = false;
-        onDragChangeRef.current?.(false);
-      },
-    }),
-  ).current;
-
-  return panResponder.panHandlers;
-}
-
 const styles = StyleSheet.create({
-  stickerHit: {
+  hit: {
     position: 'absolute',
     alignItems: 'center',
     justifyContent: 'center',
   },
-  stickerVisual: {
-    alignItems: 'center',
-    justifyContent: 'center',
+  visual: {
+    paddingHorizontal: 10,
+    paddingVertical: 6,
     borderRadius: 8,
+    maxWidth: 280,
   },
-  stickerSelected: {
+  selected: {
     borderWidth: 1,
     borderColor: colors.white,
     backgroundColor: 'rgba(255,255,255,0.12)',
   },
-  stickerEmoji: {
-    lineHeight: 32,
+  text: {
+    fontSize: 22,
+    lineHeight: 30,
     textAlign: 'center',
+    textShadowOffset: { width: 0, height: 1 },
+    textShadowRadius: 5,
   },
 });

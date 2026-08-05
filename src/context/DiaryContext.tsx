@@ -22,6 +22,7 @@ import {
   SavePhotoDecorationInput,
 } from '../types/diary';
 import { normalizeCover } from '../utils/diaryCover';
+import { buildPhotoDecoration, resolveDecorationTexts } from '../utils/diaryTextLayers';
 
 const DIARIES_STORAGE_KEY = '@damgil/diaries/v1';
 
@@ -49,11 +50,14 @@ function normalizeDecoration(decoration: PhotoDecoration | null | undefined): Ph
   if (!decoration) {
     return null;
   }
-  return {
+  const texts = resolveDecorationTexts(decoration);
+  const built = buildPhotoDecoration({
     stickers: Array.isArray(decoration.stickers) ? decoration.stickers : [],
-    note: decoration.note ?? '',
-    fontId: decoration.fontId ?? 'sans',
-    updatedAt: decoration.updatedAt ?? new Date().toISOString(),
+    texts,
+  });
+  return {
+    ...built,
+    updatedAt: decoration.updatedAt ?? built.updatedAt,
   };
 }
 
@@ -316,12 +320,15 @@ export function DiaryProvider({ children }: PropsWithChildren) {
         return false;
       }
 
-      const nextDecoration: PhotoDecoration = {
+      const texts = resolveDecorationTexts({
+        texts: input.decoration.texts,
+        note: input.decoration.note,
+        fontId: input.decoration.fontId,
+      });
+      const nextDecoration = buildPhotoDecoration({
         stickers: input.decoration.stickers ?? [],
-        note: input.decoration.note?.trim() ?? '',
-        fontId: input.decoration.fontId ?? 'sans',
-        updatedAt: new Date().toISOString(),
-      };
+        texts,
+      });
 
       hasMutatedRef.current = true;
       setDiaries((prev) =>

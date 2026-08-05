@@ -11,6 +11,18 @@ export type DecorSticker = {
   rotation: number;
 };
 
+/** 사진 위 텍스트 레이어 (스티커와 동일 제스처) */
+export type DecorTextLayer = {
+  id: string;
+  content: string;
+  fontId: DecorFontId;
+  color: string;
+  x: number;
+  y: number;
+  scale: number;
+  rotation: number;
+};
+
 export type CoverFontId = DecorFontId;
 export type CoverSticker = DecorSticker;
 
@@ -25,6 +37,8 @@ export type DiaryCover = {
 /** 원본 미디어 위 별도 레이어 (원본 uri는 교체하지 않음) */
 export type PhotoDecoration = {
   stickers: DecorSticker[];
+  texts: DecorTextLayer[];
+  /** 목록 미리보기용 — texts에서 파생 */
   note: string;
   fontId: DecorFontId;
   updatedAt: string;

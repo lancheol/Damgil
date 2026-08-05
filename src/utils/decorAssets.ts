@@ -105,3 +105,18 @@ export function getDecorFontStyle(fontId: DecorFontId): TextStyle {
 export function createStickerId(prefix = 'sticker'): string {
   return `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
 }
+
+export const DECOR_TEXT_COLORS = [
+  '#FFFFFF',
+  '#111111',
+  '#FF3B30',
+  '#FF9500',
+  '#FFCC00',
+  '#34C759',
+  '#5AC8FA',
+  '#007AFF',
+  '#AF52DE',
+  '#FF2D55',
+] as const;
+
+export const DEFAULT_DECOR_TEXT_COLOR = DECOR_TEXT_COLORS[0];
