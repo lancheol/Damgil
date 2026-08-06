@@ -2,7 +2,6 @@ import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { useCallback, useMemo, useState } from 'react';
 import {
   Alert,
-  Image,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -16,21 +15,21 @@ import { BackButton } from '../../components/common/BackButton';
 import { CoverCanvas } from '../../components/diary/CoverCanvas';
 import { useDiaries } from '../../context/DiaryContext';
 import { RootStackParamList } from '../../navigation/types';
-import { CoverFontId, CoverSticker, DiaryCover } from '../../types/diary';
+import { CoverFontId, DiaryCover } from '../../types/diary';
 import {
+  COVER_COLORS,
   COVER_FONTS,
-  COVER_STICKER_EMOJIS,
+  DEFAULT_COVER_COLOR,
   createEmptyCover,
+  getCoverBackgroundColor,
   getEffectiveCover,
-  resolveCoverImageUri,
 } from '../../utils/diaryCover';
-import { createStickerId } from '../../utils/decorAssets';
 import { colors, radii, spacing, typography } from '../../theme';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'DiaryCoverEdit'>;
 
 export function DiaryCoverEditScreen({ navigation, route }: Props) {
-  const { diaryId } = route.params;
+  const { diaryId, fromTripEnd } = route.params;
   const { getDiaryById, saveDiaryCover, discardCoverDraft } = useDiaries();
   const diary = getDiaryById(diaryId);
 
@@ -41,39 +40,31 @@ export function DiaryCoverEditScreen({ navigation, route }: Props) {
     return getEffectiveCover(diary);
   }, [diary]);
 
-  const [title, setTitle] = useState(initial.title);
+  const [title, setTitle] = useState(initial.title || diary?.name || '');
   const [fontId, setFontId] = useState<CoverFontId>(initial.fontId);
-  const [coverPhotoId, setCoverPhotoId] = useState<string | null>(initial.coverPhotoId);
-  const [stickers, setStickers] = useState<CoverSticker[]>(initial.stickers);
-  const [selectedStickerId, setSelectedStickerId] = useState<string | null>(null);
-  const [draggingSticker, setDraggingSticker] = useState(false);
+  const [backgroundColor, setBackgroundColor] = useState(
+    getCoverBackgroundColor(initial) || DEFAULT_COVER_COLOR,
+  );
   const [dirty, setDirty] = useState(false);
 
   const markDirty = useCallback(() => setDirty(true), []);
 
   const buildCover = useCallback((): DiaryCover => {
     return {
-      coverPhotoId,
+      coverPhotoId: null,
       title: title.trim() || diary?.name || '나의 여행',
       fontId,
-      stickers,
+      stickers: [],
+      backgroundColor,
       updatedAt: new Date().toISOString(),
     };
-  }, [coverPhotoId, title, fontId, stickers, diary?.name]);
+  }, [title, fontId, backgroundColor, diary?.name]);
 
-  const previewUri = diary
-    ? resolveCoverImageUri(diary, {
-        coverPhotoId,
-        title,
-        fontId,
-        stickers,
-        updatedAt: '',
-      })
-    : null;
+  const leaveToMyPage = () => {
+    navigation.navigate('Main', { screen: 'MyPage' });
+  };
 
-  const selectedSticker = stickers.find((item) => item.id === selectedStickerId) ?? null;
-
-  const handleSave = () => {
+  const handleNext = () => {
     if (!diary) {
       return;
     }
@@ -87,66 +78,46 @@ export function DiaryCoverEditScreen({ navigation, route }: Props) {
       return;
     }
     setDirty(false);
+    if (fromTripEnd) {
+      navigation.replace('DiaryEdit', { diaryId });
+      return;
+    }
     navigation.goBack();
   };
 
   const handleLeave = () => {
-    if (!dirty) {
-      navigation.goBack();
-      return;
-    }
-
-    Alert.alert('표지 편집', '편집 내용을 임시 저장할까요?', [
-      {
-        text: '저장 안 함',
-        style: 'destructive',
-        onPress: () => {
-          discardCoverDraft(diaryId);
-          setDirty(false);
-          navigation.goBack();
+    Alert.alert(
+      '임시 저장',
+      '표지 편집을 임시 저장할까요?\n임시 저장한 다이어리는 비공개로 마이페이지에 등록됩니다.',
+      [
+        { text: '취소', style: 'cancel' },
+        {
+          text: '저장 안 함',
+          style: 'destructive',
+          onPress: () => {
+            discardCoverDraft(diaryId);
+            setDirty(false);
+            leaveToMyPage();
+          },
         },
-      },
-      {
-        text: '취소',
-        style: 'cancel',
-      },
-      {
-        text: '임시 저장',
-        onPress: () => {
-          saveDiaryCover({
-            diaryId,
-            cover: buildCover(),
-            mode: 'draft',
-          });
-          setDirty(false);
-          navigation.goBack();
+        {
+          text: '임시 저장',
+          onPress: () => {
+            const ok = saveDiaryCover({
+              diaryId,
+              cover: buildCover(),
+              mode: 'draft',
+            });
+            if (!ok) {
+              Alert.alert('저장 실패', '임시 저장하지 못했어요.');
+              return;
+            }
+            setDirty(false);
+            leaveToMyPage();
+          },
         },
-      },
-    ]);
-  };
-
-  const addSticker = (emoji: string) => {
-    const sticker: CoverSticker = {
-      id: createStickerId(),
-      emoji,
-      x: 0.5,
-      y: 0.4,
-      scale: 1,
-      rotation: 0,
-    };
-    setStickers((prev) => [...prev, sticker]);
-    setSelectedStickerId(sticker.id);
-    markDirty();
-  };
-
-  const updateSelected = (patch: Partial<CoverSticker>) => {
-    if (!selectedStickerId) {
-      return;
-    }
-    setStickers((prev) =>
-      prev.map((item) => (item.id === selectedStickerId ? { ...item, ...patch } : item)),
+      ],
     );
-    markDirty();
   };
 
   if (!diary) {
@@ -168,14 +139,14 @@ export function DiaryCoverEditScreen({ navigation, route }: Props) {
         <BackButton onPress={handleLeave} />
         <View style={styles.headerCopy}>
           <Text style={styles.headerTitle}>표지 편집</Text>
-          <Text style={styles.headerSubtitle}>홈·피드 썸네일로 사용돼요</Text>
+          <Text style={styles.headerSubtitle}>여행 다이어리 표지를 꾸며 보세요</Text>
         </View>
         <Pressable
           accessibilityRole="button"
-          onPress={handleSave}
-          style={({ pressed }) => [styles.saveChip, pressed && styles.pressed]}
+          onPress={handleNext}
+          style={({ pressed }) => [styles.nextChip, pressed && styles.pressed]}
         >
-          <Text style={styles.saveChipText}>저장</Text>
+          <Text style={styles.nextChipText}>다음</Text>
         </Pressable>
       </View>
 
@@ -183,29 +154,13 @@ export function DiaryCoverEditScreen({ navigation, route }: Props) {
         contentContainerStyle={styles.content}
         keyboardShouldPersistTaps="handled"
         showsVerticalScrollIndicator={false}
-        scrollEnabled={!draggingSticker}
       >
         <CoverCanvas
-          imageUri={previewUri}
-          title={title}
+          backgroundColor={backgroundColor}
+          title={title.trim() || diary.name}
           fontId={fontId}
-          stickers={stickers}
-          selectedStickerId={selectedStickerId}
-          editable
-          onSelectSticker={setSelectedStickerId}
-          onStickerDragChange={setDraggingSticker}
-          onMoveSticker={(id, x, y) => {
-            setStickers((prev) => prev.map((item) => (item.id === id ? { ...item, x, y } : item)));
-            markDirty();
-          }}
-          onScaleSticker={(id, scale) => {
-            setStickers((prev) => prev.map((item) => (item.id === id ? { ...item, scale } : item)));
-            markDirty();
-          }}
-          onRotateSticker={(id, rotation) => {
-            setStickers((prev) => prev.map((item) => (item.id === id ? { ...item, rotation } : item)));
-            markDirty();
-          }}
+          stickers={[]}
+          selectedStickerId={null}
         />
 
         <View style={styles.block}>
@@ -246,87 +201,30 @@ export function DiaryCoverEditScreen({ navigation, route }: Props) {
         </View>
 
         <View style={styles.block}>
-          <Text style={styles.blockLabel}>대표 이미지</Text>
-          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.thumbRow}>
-            <Pressable
-              onPress={() => {
-                setCoverPhotoId(null);
-                markDirty();
-              }}
-              style={[styles.thumbItem, coverPhotoId === null && styles.thumbItemActive]}
-            >
-              <View style={styles.defaultThumb}>
-                <Text style={styles.defaultThumbText}>기본</Text>
-              </View>
-            </Pressable>
-            {(diary.photos ?? []).map((photo) => {
-              const active = coverPhotoId === photo.id;
+          <Text style={styles.blockLabel}>표지 색상</Text>
+          <View style={styles.colorRow}>
+            {COVER_COLORS.map((swatch) => {
+              const active = backgroundColor === swatch;
               return (
                 <Pressable
-                  key={photo.id}
+                  key={swatch}
                   onPress={() => {
-                    setCoverPhotoId(photo.id);
+                    setBackgroundColor(swatch);
                     markDirty();
                   }}
-                  style={[styles.thumbItem, active && styles.thumbItemActive]}
-                >
-                  <Image source={{ uri: photo.uri }} style={styles.thumbImage} resizeMode="cover" />
-                  {(photo.mediaType ?? 'photo') === 'video' ? (
-                    <View style={styles.videoTag}>
-                      <Text style={styles.videoTagText}>V</Text>
-                    </View>
-                  ) : null}
-                </Pressable>
+                  style={[
+                    styles.colorSwatch,
+                    { backgroundColor: swatch },
+                    active && styles.colorSwatchActive,
+                    swatch === '#F5F5F5' && styles.colorSwatchBorder,
+                  ]}
+                  accessibilityRole="button"
+                  accessibilityState={{ selected: active }}
+                  accessibilityLabel={`표지 색상 ${swatch}`}
+                />
               );
             })}
-          </ScrollView>
-        </View>
-
-        <View style={styles.block}>
-          <Text style={styles.blockLabel}>스티커</Text>
-          <View style={styles.stickerRow}>
-            {COVER_STICKER_EMOJIS.map((emoji) => (
-              <Pressable
-                key={emoji}
-                onPress={() => addSticker(emoji)}
-                style={({ pressed }) => [styles.stickerAdd, pressed && styles.pressed]}
-              >
-                <Text style={styles.stickerAddText}>{emoji}</Text>
-              </Pressable>
-            ))}
           </View>
-
-          {selectedSticker ? (
-            <View style={styles.stickerTools}>
-              <Text style={styles.toolHint}>두 손가락으로 크기·회전 · 버튼으로 미세 회전/삭제</Text>
-              <View style={styles.toolRow}>
-                <Pressable
-                  style={styles.toolButton}
-                  onPress={() => updateSelected({ rotation: selectedSticker.rotation - 15 })}
-                >
-                  <Text style={styles.toolButtonText}>↺</Text>
-                </Pressable>
-                <Pressable
-                  style={styles.toolButton}
-                  onPress={() => updateSelected({ rotation: selectedSticker.rotation + 15 })}
-                >
-                  <Text style={styles.toolButtonText}>↻</Text>
-                </Pressable>
-                <Pressable
-                  style={[styles.toolButton, styles.toolDanger]}
-                  onPress={() => {
-                    setStickers((prev) => prev.filter((item) => item.id !== selectedSticker.id));
-                    setSelectedStickerId(null);
-                    markDirty();
-                  }}
-                >
-                  <Text style={[styles.toolButtonText, styles.toolDangerText]}>삭제</Text>
-                </Pressable>
-              </View>
-            </View>
-          ) : (
-            <Text style={styles.toolHint}>스티커를 추가한 뒤 드래그·핀치·회전으로 배치하세요</Text>
-          )}
         </View>
       </ScrollView>
     </SafeAreaView>
@@ -360,7 +258,7 @@ const styles = StyleSheet.create({
     fontSize: 13,
     color: colors.inkMuted,
   },
-  saveChip: {
+  nextChip: {
     minHeight: 36,
     paddingHorizontal: spacing.md,
     borderRadius: radii.pill,
@@ -368,7 +266,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  saveChipText: {
+  nextChipText: {
     ...typography.label,
     color: colors.white,
   },
@@ -396,11 +294,13 @@ const styles = StyleSheet.create({
   },
   fontRow: {
     flexDirection: 'row',
+    flexWrap: 'wrap',
     gap: spacing.sm,
   },
   fontChip: {
-    flex: 1,
+    minWidth: 64,
     minHeight: 44,
+    paddingHorizontal: spacing.md,
     borderRadius: radii.md,
     borderWidth: 1,
     borderColor: colors.border,
@@ -419,103 +319,24 @@ const styles = StyleSheet.create({
   fontChipTextActive: {
     color: colors.white,
   },
-  thumbRow: {
+  colorRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
     gap: spacing.sm,
-    paddingVertical: 2,
   },
-  thumbItem: {
-    width: 72,
-    height: 96,
-    borderRadius: radii.sm,
-    overflow: 'hidden',
+  colorSwatch: {
+    width: 40,
+    height: 40,
+    borderRadius: radii.pill,
     borderWidth: 2,
     borderColor: 'transparent',
-    backgroundColor: '#E5E7EB',
   },
-  thumbItemActive: {
-    borderColor: colors.black,
-  },
-  thumbImage: {
-    width: '100%',
-    height: '100%',
-  },
-  defaultThumb: {
-    flex: 1,
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: '#1A1A1A',
-  },
-  defaultThumbText: {
-    ...typography.monoBody,
-    color: '#9A9A9A',
-  },
-  videoTag: {
-    position: 'absolute',
-    right: 4,
-    bottom: 4,
-    width: 18,
-    height: 18,
-    borderRadius: 4,
-    backgroundColor: 'rgba(0,0,0,0.55)',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  videoTagText: {
-    color: colors.white,
-    fontSize: 10,
-    fontWeight: '700',
-  },
-  stickerRow: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: spacing.sm,
-  },
-  stickerAdd: {
-    width: 44,
-    height: 44,
-    borderRadius: radii.sm,
-    backgroundColor: colors.white,
-    alignItems: 'center',
-    justifyContent: 'center',
+  colorSwatchBorder: {
     borderWidth: StyleSheet.hairlineWidth,
-    borderColor: colors.border,
+    borderColor: '#D1D5DB',
   },
-  stickerAddText: {
-    fontSize: 22,
-  },
-  stickerTools: {
-    gap: spacing.sm,
-    marginTop: spacing.sm,
-  },
-  toolHint: {
-    ...typography.body,
-    fontSize: 13,
-    color: colors.inkMuted,
-  },
-  toolRow: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: spacing.sm,
-  },
-  toolButton: {
-    minHeight: 36,
-    paddingHorizontal: spacing.md,
-    borderRadius: radii.pill,
-    backgroundColor: colors.white,
-    borderWidth: 1,
-    borderColor: colors.border,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  toolButtonText: {
-    ...typography.label,
-    color: colors.ink,
-  },
-  toolDanger: {
-    borderColor: colors.danger,
-  },
-  toolDangerText: {
-    color: colors.danger,
+  colorSwatchActive: {
+    borderColor: colors.black,
   },
   centered: {
     flex: 1,

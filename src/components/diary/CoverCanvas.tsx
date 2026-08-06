@@ -3,11 +3,15 @@ import { Image, StyleSheet, Text, View, ViewStyle } from 'react-native';
 
 import { DraggableSticker, useCanvasPinchHandlers } from './DraggableSticker';
 import { CoverFontId, CoverSticker } from '../../types/diary';
-import { getCoverFontStyle } from '../../utils/diaryCover';
-import { colors, typography } from '../../theme';
+import {
+  DEFAULT_COVER_COLOR,
+  getCoverFontStyle,
+  getCoverTitleColor,
+} from '../../utils/diaryCover';
 
 type CoverCanvasProps = {
-  imageUri: string | null;
+  imageUri?: string | null;
+  backgroundColor?: string;
   title: string;
   fontId: CoverFontId;
   stickers: CoverSticker[];
@@ -22,7 +26,8 @@ type CoverCanvasProps = {
 };
 
 export function CoverCanvas({
-  imageUri,
+  imageUri = null,
+  backgroundColor = DEFAULT_COVER_COLOR,
   title,
   fontId,
   stickers,
@@ -38,6 +43,8 @@ export function CoverCanvas({
   const layoutRef = useRef({ width: 1, height: 1 });
   const stickersRef = useRef(stickers);
   stickersRef.current = stickers;
+
+  const titleColor = getCoverTitleColor(backgroundColor);
 
   const pinchHandlers = useCanvasPinchHandlers({
     enabled: editable,
@@ -56,7 +63,7 @@ export function CoverCanvas({
 
   return (
     <View
-      style={[styles.canvas, style]}
+      style={[styles.canvas, { backgroundColor }, style]}
       {...(editable ? pinchHandlers : {})}
       onLayout={(event) => {
         layoutRef.current = {
@@ -67,16 +74,16 @@ export function CoverCanvas({
     >
       {imageUri ? (
         <Image source={{ uri: imageUri }} style={styles.image} resizeMode="cover" />
-      ) : (
-        <View style={styles.fallback}>
-          <Text style={styles.fallbackText}>담길</Text>
-        </View>
-      )}
-      <View style={styles.dim} pointerEvents="none" />
+      ) : null}
 
-      <Text style={[styles.title, getCoverFontStyle(fontId)]} numberOfLines={3} pointerEvents="none">
-        {title || '제목 없음'}
-      </Text>
+      <View style={styles.titleWrap} pointerEvents="none">
+        <Text
+          style={[styles.title, getCoverFontStyle(fontId), { color: titleColor }]}
+          numberOfLines={4}
+        >
+          {title || '제목 없음'}
+        </Text>
+      </View>
 
       {stickers.map((sticker) => (
         <DraggableSticker
@@ -102,36 +109,19 @@ const styles = StyleSheet.create({
     aspectRatio: 3 / 4,
     borderRadius: 16,
     overflow: 'hidden',
-    backgroundColor: colors.black,
   },
   image: {
     ...StyleSheet.absoluteFillObject,
   },
-  fallback: {
+  titleWrap: {
     ...StyleSheet.absoluteFillObject,
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: '#1A1A1A',
-  },
-  fallbackText: {
-    ...typography.monoBody,
-    color: '#7A7A7A',
-    letterSpacing: 2,
-  },
-  dim: {
-    ...StyleSheet.absoluteFillObject,
-    backgroundColor: 'rgba(0,0,0,0.28)',
+    paddingHorizontal: 28,
   },
   title: {
-    position: 'absolute',
-    left: 20,
-    right: 20,
-    bottom: 28,
     fontSize: 28,
-    color: colors.white,
+    textAlign: 'center',
     letterSpacing: -0.5,
-    textShadowColor: 'rgba(0,0,0,0.45)',
-    textShadowOffset: { width: 0, height: 1 },
-    textShadowRadius: 4,
   },
 });

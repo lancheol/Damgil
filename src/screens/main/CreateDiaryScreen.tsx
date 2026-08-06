@@ -4,7 +4,6 @@ import {
   KeyboardAvoidingView,
   Platform,
   Pressable,
-  ScrollView,
   StyleSheet,
   Text,
   TextInput,
@@ -51,72 +50,68 @@ export function CreateDiaryScreen({ navigation }: Props) {
         style={styles.flex}
         behavior={Platform.OS === 'ios' ? 'padding' : undefined}
       >
-        <View style={styles.header}>
+        <View style={styles.topBar}>
           <BackButton onPress={() => navigation.goBack()} />
-          <View style={styles.headerCopy}>
-            <Text style={styles.eyebrow}>새로운 여행</Text>
-            <Text style={styles.title}>New Diary</Text>
-          </View>
         </View>
 
-        <ScrollView
-          contentContainerStyle={styles.content}
-          keyboardShouldPersistTaps="handled"
-          showsVerticalScrollIndicator={false}
-        >
-          <View style={styles.field}>
-            <Text style={styles.label}>Diary name</Text>
-            <TextInput
-              value={name}
-              onChangeText={(text) => {
-                setName(text);
-                if (nameError) {
-                  setNameError(undefined);
-                }
-              }}
-              placeholder="ex. XX여행"
-              placeholderTextColor={colors.placeholder}
-              style={[styles.input, nameError ? styles.inputError : null]}
-              autoCapitalize="none"
-              returnKeyType="next"
-            />
-            {nameError ? <Text style={styles.error}>{nameError}</Text> : null}
-          </View>
+        <View style={styles.body}>
+          <View style={styles.card}>
+            <View style={styles.paper}>
+              <View style={styles.tape} />
 
-          <View style={styles.field}>
-            <Text style={styles.label}>Travel place</Text>
-            <TextInput
-              value={place}
-              onChangeText={(text) => {
-                setPlace(text);
-                if (placeError) {
-                  setPlaceError(undefined);
-                }
-              }}
-              placeholder="ex. 강릉, 부산"
-              placeholderTextColor={colors.placeholder}
-              style={[styles.input, placeError ? styles.inputError : null]}
-              autoCapitalize="none"
-              returnKeyType="done"
-              onSubmitEditing={handleSubmit}
-            />
-            {placeError ? <Text style={styles.error}>{placeError}</Text> : null}
-          </View>
-        </ScrollView>
+              <TextInput
+                value={name}
+                onChangeText={(text) => {
+                  setName(text);
+                  if (nameError) {
+                    setNameError(undefined);
+                  }
+                }}
+                placeholder="다이어리 이름"
+                placeholderTextColor={colors.placeholder}
+                style={[styles.nameInput, nameError ? styles.inputError : null]}
+                autoCapitalize="none"
+                returnKeyType="next"
+                textAlign="center"
+              />
+              {nameError ? <Text style={styles.error}>{nameError}</Text> : null}
 
-        <View style={styles.footer}>
-          <Pressable
-            accessibilityRole="button"
-            accessibilityState={{ disabled: !canSubmit }}
-            onPress={handleSubmit}
-            style={({ pressed }) => [
-              styles.submitButton,
-              canSubmit ? styles.submitButtonReady : styles.submitButtonDisabled,
-              pressed && canSubmit && styles.submitButtonPressed,
-            ]}
-          >
-            <Text style={styles.submitText}>Travel Start</Text>
-          </Pressable>
+              <TextInput
+                value={place}
+                onChangeText={(text) => {
+                  setPlace(text);
+                  if (placeError) {
+                    setPlaceError(undefined);
+                  }
+                }}
+                placeholder="여행지 (예: 부산)"
+                placeholderTextColor={colors.placeholder}
+                style={[styles.placeInput, placeError ? styles.inputError : null]}
+                autoCapitalize="none"
+                returnKeyType="done"
+                textAlign="center"
+                onSubmitEditing={handleSubmit}
+              />
+              {placeError ? <Text style={styles.error}>{placeError}</Text> : null}
+
+              {/* 하단 사용 방법 (a)~ 문구는 이후에 채움 */}
+              <View style={styles.guideSlot} />
+            </View>
+
+            <Pressable
+              accessibilityRole="button"
+              accessibilityState={{ disabled: !canSubmit }}
+              accessibilityLabel="여행 시작"
+              onPress={handleSubmit}
+              style={({ pressed }) => [
+                styles.startBtn,
+                canSubmit ? styles.startBtnReady : styles.startBtnDisabled,
+                pressed && canSubmit && styles.startBtnPressed,
+              ]}
+            >
+              <Text style={styles.startText}>Travel Start</Text>
+            </Pressable>
+          </View>
         </View>
       </KeyboardAvoidingView>
     </SafeAreaView>
@@ -131,87 +126,106 @@ const styles = StyleSheet.create({
   flex: {
     flex: 1,
   },
-  header: {
-    flexDirection: 'row',
-    alignItems: 'center',
+  topBar: {
     paddingHorizontal: spacing.lg,
     paddingTop: spacing.sm,
-    paddingBottom: spacing.xl,
-    gap: spacing.sm,
+    paddingBottom: spacing.sm,
   },
-  headerCopy: {
-    gap: 3,
-  },
-  eyebrow: {
-    fontSize: 13,
-    fontWeight: '500',
-    color: colors.ink,
-  },
-  title: {
-    fontSize: 20,
-    fontWeight: '700',
-    letterSpacing: 0.4,
-    color: colors.ink,
-  },
-  content: {
-    paddingHorizontal: spacing.xl,
-    gap: spacing.xl,
-    paddingBottom: spacing.xxl,
-  },
-  field: {
-    gap: spacing.sm,
-  },
-  label: {
-    fontSize: 14,
-    fontWeight: '400',
-    letterSpacing: 0.3,
-    color: colors.ink,
-    paddingLeft: spacing.sm,
-  },
-  input: {
-    height: 46,
-    borderRadius: radii.pill,
-    backgroundColor: colors.white,
-    paddingHorizontal: spacing.lg,
-    fontSize: 12,
-    color: colors.ink,
-    shadowColor: '#0D0A2C',
-    shadowOpacity: 0.06,
-    shadowRadius: 12,
-    shadowOffset: { width: 0, height: 4 },
-    elevation: 2,
-  },
-  inputError: {
-    borderWidth: 1,
-    borderColor: colors.danger,
-  },
-  error: {
-    fontSize: 12,
-    color: colors.danger,
-    paddingLeft: spacing.sm,
-  },
-  footer: {
-    paddingHorizontal: spacing.xl,
+  body: {
+    flex: 1,
     paddingBottom: spacing.lg,
+    paddingTop: spacing.sm,
   },
-  submitButton: {
-    height: 62,
-    borderRadius: radii.pill,
+  card: {
+    flex: 1,
+    backgroundColor: colors.black,
+    borderRadius: radii.xl,
+    marginHorizontal: spacing.xl,
+    paddingHorizontal: spacing.lg,
+    paddingTop: spacing.xxl,
+    paddingBottom: spacing.xxxl,
     alignItems: 'center',
     justifyContent: 'center',
   },
-  submitButtonDisabled: {
-    backgroundColor: '#D9D9D9',
+  paper: {
+    width: '100%',
+    maxWidth: 280,
+    backgroundColor: colors.white,
+    borderRadius: 4,
+    paddingTop: spacing.xxl,
+    paddingBottom: spacing.xl,
+    paddingHorizontal: spacing.lg,
+    shadowColor: colors.black,
+    shadowOpacity: 0.2,
+    shadowRadius: 12,
+    shadowOffset: { width: 0, height: 6 },
+    elevation: 4,
   },
-  submitButtonReady: {
-    backgroundColor: colors.black,
+  tape: {
+    position: 'absolute',
+    top: -10,
+    alignSelf: 'center',
+    left: '50%',
+    marginLeft: -36,
+    width: 72,
+    height: 22,
+    backgroundColor: colors.tape,
+    borderRadius: 2,
+    opacity: 0.92,
+    transform: [{ rotate: '-2deg' }],
   },
-  submitButtonPressed: {
-    opacity: 0.88,
+  nameInput: {
+    ...typography.monoTitle,
+    color: colors.ink,
+    textAlign: 'center',
+    marginBottom: spacing.sm,
+    paddingVertical: spacing.xs,
   },
-  submitText: {
-    fontSize: 16,
-    fontWeight: '400',
+  placeInput: {
+    ...typography.monoBody,
+    color: colors.inkSoft,
+    textAlign: 'center',
+    paddingVertical: spacing.xs,
+    marginBottom: spacing.md,
+  },
+  inputError: {
+    color: colors.danger,
+  },
+  error: {
+    fontSize: 11,
+    color: colors.danger,
+    textAlign: 'center',
+    marginBottom: spacing.xs,
+  },
+  guideSlot: {
+    minHeight: 120,
+  },
+  startBtn: {
+    position: 'absolute',
+    bottom: spacing.xl,
+    minWidth: 160,
+    height: 52,
+    paddingHorizontal: spacing.xl,
+    borderRadius: radii.pill,
+    borderWidth: 1.5,
+    borderColor: colors.white,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  startBtnReady: {
+    backgroundColor: colors.overlay,
+  },
+  startBtnDisabled: {
+    backgroundColor: 'rgba(255,255,255,0.12)',
+    borderColor: 'rgba(255,255,255,0.35)',
+  },
+  startBtnPressed: {
+    opacity: 0.85,
+    transform: [{ scale: 0.96 }],
+  },
+  startText: {
+    fontSize: 15,
+    fontWeight: '500',
     letterSpacing: 0.4,
     color: colors.white,
   },

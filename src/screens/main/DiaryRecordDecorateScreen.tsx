@@ -16,9 +16,10 @@ import {
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { RecordDecorCanvas } from '../../components/diary/RecordDecorCanvas';
+import { PhotoCropModal } from '../../components/diary/PhotoCropModal';
 import { useDiaries } from '../../context/DiaryContext';
 import { RootStackParamList } from '../../navigation/types';
-import { DecorFontId, DecorSticker, DecorTextLayer, PhotoDecoration } from '../../types/diary';
+import { DecorFontId, DecorSticker, DecorTextLayer, PhotoCropRect, PhotoDecoration } from '../../types/diary';
 import {
   createStickerId,
   DECOR_FONTS,
@@ -29,6 +30,7 @@ import {
 import {
   buildPhotoDecoration,
   createTextLayer,
+  normalizeCropRect,
   resolveDecorationTexts,
 } from '../../utils/diaryTextLayers';
 import {
@@ -40,7 +42,7 @@ import {
 import { colors, radii, spacing, typography } from '../../theme';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'DiaryRecordDecorate'>;
-type ToolSheet = 'none' | 'sticker' | 'text' | 'more';
+type ToolSheet = 'none' | 'sticker' | 'text';
 
 type HitRect = { x: number; y: number; width: number; height: number };
 
@@ -50,18 +52,23 @@ function emptyDecoration(note = ''): PhotoDecoration {
     texts: note.trim()
       ? [createTextLayer(note.trim(), 'sans', { x: 0.5, y: 0.72 })]
       : [],
+    cropRect: null,
   });
 }
 
 export function DiaryRecordDecorateScreen({ navigation, route }: Props) {
   const { diaryId, photoId } = route.params;
   const insets = useSafeAreaInsets();
-  const { getDiaryById, savePhotoDecoration, removePhotosFromDiary } = useDiaries();
+  const { getDiaryById, savePhotoDecoration } = useDiaries();
   const diary = getDiaryById(diaryId);
 
   const orderedIds = useMemo(() => {
     if (!diary) {
       return [] as string[];
+    }
+    const selected = diary.placeSelections?.map((s) => s.representativePhotoId).filter(Boolean);
+    if (selected?.length) {
+      return selected;
     }
     return buildDiaryTimeline(diary).flatMap((group) => group.records.map((item) => item.id));
   }, [diary]);
@@ -74,6 +81,8 @@ export function DiaryRecordDecorateScreen({ navigation, route }: Props) {
 
   const [stickers, setStickers] = useState<DecorSticker[]>(initial.stickers);
   const [texts, setTexts] = useState<DecorTextLayer[]>(initialTexts);
+  const [cropRect, setCropRect] = useState<PhotoCropRect | null>(initial.cropRect ?? null);
+  const [cropOpen, setCropOpen] = useState(false);
   const [selectedStickerId, setSelectedStickerId] = useState<string | null>(null);
   const [selectedTextId, setSelectedTextId] = useState<string | null>(null);
   const [draggingLayer, setDraggingLayer] = useState(false);
@@ -96,6 +105,7 @@ export function DiaryRecordDecorateScreen({ navigation, route }: Props) {
     const next = photo.decoration ?? emptyDecoration(photo.note ?? '');
     setStickers(next.stickers);
     setTexts(resolveDecorationTexts(next));
+    setCropRect(next.cropRect ?? null);
     setSelectedStickerId(null);
     setSelectedTextId(null);
     setDraggingLayer(false);
@@ -104,6 +114,7 @@ export function DiaryRecordDecorateScreen({ navigation, route }: Props) {
     setDirty(false);
     setSheet('none');
     setEditingTextId(null);
+    setCropOpen(false);
   }, [photoId, photo?.decoration?.updatedAt, photo?.id]);
 
   const markDirty = useCallback(() => setDirty(true), []);
@@ -166,9 +177,9 @@ export function DiaryRecordDecorateScreen({ navigation, route }: Props) {
     return savePhotoDecoration({
       diaryId,
       photoId: photo.id,
-      decoration: buildPhotoDecoration({ stickers, texts }),
+      decoration: buildPhotoDecoration({ stickers, texts, cropRect }),
     });
-  }, [diary, photo, diaryId, stickers, texts, savePhotoDecoration]);
+  }, [diary, photo, diaryId, stickers, texts, cropRect, savePhotoDecoration]);
 
   const goToPhoto = (nextId: string, transition: 'prev' | 'next') => {
     if (dirty) {
@@ -217,32 +228,6 @@ export function DiaryRecordDecorateScreen({ navigation, route }: Props) {
         },
       },
     ]);
-  };
-
-  const handleDeleteRecord = () => {
-    if (!photo) {
-      return;
-    }
-    setSheet('none');
-    Alert.alert(
-      '기록 삭제',
-      '이 장소 기록을 삭제할까요? 원본 미디어와 꾸미기 레이어가 함께 삭제됩니다.',
-      [
-        { text: '취소', style: 'cancel' },
-        {
-          text: '삭제',
-          style: 'destructive',
-          onPress: () => {
-            const ok = removePhotosFromDiary(diaryId, [photo.id]);
-            if (!ok) {
-              Alert.alert('삭제 실패', '기록을 삭제하지 못했습니다.');
-              return;
-            }
-            navigation.goBack();
-          },
-        },
-      ],
-    );
   };
 
   const clearSelection = () => {
@@ -355,6 +340,7 @@ export function DiaryRecordDecorateScreen({ navigation, route }: Props) {
       <RecordDecorCanvas
         uri={photo.uri}
         mediaType={photo.mediaType}
+        cropRect={cropRect}
         stickers={stickers}
         texts={texts}
         selectedStickerId={selectedStickerId}
@@ -483,8 +469,7 @@ export function DiaryRecordDecorateScreen({ navigation, route }: Props) {
                 {getPlaceLabel(photo)}
               </Text>
               <Text style={styles.topSubtitle}>
-                {dayNumber}일차 · {formatRecordTime(photo.createdAt)} · {currentIndex + 1}/
-                {orderedIds.length}
+                다이어리 꾸미기 · {dayNumber}일차 · {formatRecordTime(photo.createdAt)}
               </Text>
             </View>
           ) : (
@@ -541,12 +526,24 @@ export function DiaryRecordDecorateScreen({ navigation, route }: Props) {
             <View style={styles.toolBar}>
               <Pressable
                 accessibilityRole="button"
+                accessibilityLabel="자르기"
+                onPress={() => {
+                  clearSelection();
+                  setCropOpen(true);
+                }}
+                style={({ pressed }) => [styles.toolItem, pressed && styles.pressed]}
+              >
+                <Ionicons name="crop-outline" size={26} color={colors.white} />
+                <Text style={styles.toolLabel}>자르기</Text>
+              </Pressable>
+              <Pressable
+                accessibilityRole="button"
                 accessibilityLabel="텍스트"
                 onPress={openTextTool}
                 style={({ pressed }) => [styles.toolItem, pressed && styles.pressed]}
               >
                 <Text style={styles.toolAa}>Aa</Text>
-                <Text style={styles.toolLabel}>텍스트</Text>
+                <Text style={styles.toolLabel}>문구</Text>
               </Pressable>
               <Pressable
                 accessibilityRole="button"
@@ -556,15 +553,6 @@ export function DiaryRecordDecorateScreen({ navigation, route }: Props) {
               >
                 <Ionicons name="happy-outline" size={26} color={colors.white} />
                 <Text style={styles.toolLabel}>스티커</Text>
-              </Pressable>
-              <Pressable
-                accessibilityRole="button"
-                accessibilityLabel="더보기"
-                onPress={() => setSheet('more')}
-                style={({ pressed }) => [styles.toolItem, pressed && styles.pressed]}
-              >
-                <Ionicons name="ellipsis-horizontal" size={26} color={colors.white} />
-                <Text style={styles.toolLabel}>더보기</Text>
               </Pressable>
             </View>
           ) : null}
@@ -622,7 +610,7 @@ export function DiaryRecordDecorateScreen({ navigation, route }: Props) {
                   },
                 ]}
               >
-                {draftText.trim() ? draftText : '짧은 기록을 남겨 보세요'}
+                {draftText.trim() ? draftText : '다이어리에 남길 문구를 적어 보세요'}
               </Text>
               <TextInput
                 value={draftText}
@@ -688,22 +676,17 @@ export function DiaryRecordDecorateScreen({ navigation, route }: Props) {
         </KeyboardAvoidingView>
       </Modal>
 
-      <Modal visible={sheet === 'more'} transparent animationType="fade" onRequestClose={() => setSheet('none')}>
-        <Pressable style={styles.sheetBackdrop} onPress={() => setSheet('none')} />
-        <View style={[styles.moreSheet, { paddingBottom: Math.max(insets.bottom, 16) }]}>
-          <Text style={styles.moreHint}>편집 중에는 사진·영상 원본을 바꾸거나 재촬영할 수 없어요.</Text>
-          <Pressable
-            onPress={handleDeleteRecord}
-            style={({ pressed }) => [styles.moreDanger, pressed && styles.pressed]}
-          >
-            <Ionicons name="trash-outline" size={18} color={colors.danger} />
-            <Text style={styles.moreDangerText}>이 기록 삭제</Text>
-          </Pressable>
-          <Pressable onPress={() => setSheet('none')} style={styles.moreCancel}>
-            <Text style={styles.moreCancelText}>닫기</Text>
-          </Pressable>
-        </View>
-      </Modal>
+      <PhotoCropModal
+        visible={cropOpen}
+        uri={photo.uri}
+        initialCrop={cropRect}
+        onCancel={() => setCropOpen(false)}
+        onConfirm={(next) => {
+          setCropRect(normalizeCropRect(next));
+          setCropOpen(false);
+          markDirty();
+        }}
+      />
     </View>
   );
 }

@@ -18,7 +18,12 @@
     "android": {
       "package": "com.damgil.app",
       "versionCode": 1,
-      "permissions": ["CAMERA", "RECORD_AUDIO"],
+      "permissions": [
+        "CAMERA",
+        "RECORD_AUDIO",
+        "READ_MEDIA_IMAGES",
+        "READ_EXTERNAL_STORAGE"
+      ],
       "adaptiveIcon": {
         "backgroundColor": "#E6F4FE",
         "foregroundImage": "./assets/android-icon-foreground.png",
@@ -47,6 +52,12 @@
           "cameraPermission": "여행 기록을 위해 카메라 접근이 필요합니다.",
           "microphonePermission": "동영상 촬영을 위해 마이크 접근이 필요합니다.",
           "recordAudioAndroid": true
+        }
+      ],
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "다이어리 꾸미기를 위해 사진 라이브러리 접근이 필요합니다."
         }
       ],
       "expo-video"

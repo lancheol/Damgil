@@ -1,5 +1,28 @@
-import { DecorFontId, DecorTextLayer, PhotoDecoration } from '../types/diary';
+import { DecorFontId, DecorTextLayer, PhotoCropRect, PhotoDecoration } from '../types/diary';
 import { createStickerId, DEFAULT_DECOR_TEXT_COLOR } from './decorAssets';
+
+export const FULL_CROP_RECT: PhotoCropRect = {
+  x: 0,
+  y: 0,
+  width: 1,
+  height: 1,
+};
+
+export function normalizeCropRect(crop?: PhotoCropRect | null): PhotoCropRect {
+  if (!crop) {
+    return { ...FULL_CROP_RECT };
+  }
+  const width = Math.min(1, Math.max(0.15, crop.width));
+  const height = Math.min(1, Math.max(0.15, crop.height));
+  const x = Math.min(1 - width, Math.max(0, crop.x));
+  const y = Math.min(1 - height, Math.max(0, crop.y));
+  return { x, y, width, height };
+}
+
+export function isFullCrop(crop?: PhotoCropRect | null): boolean {
+  const c = normalizeCropRect(crop);
+  return c.x <= 0.001 && c.y <= 0.001 && c.width >= 0.999 && c.height >= 0.999;
+}
 
 export function createTextLayerId(prefix = 'text'): string {
   return createStickerId(prefix);
@@ -73,13 +96,16 @@ export function resolveDecorationTexts(
 export function buildPhotoDecoration(input: {
   stickers: PhotoDecoration['stickers'];
   texts: DecorTextLayer[];
+  cropRect?: PhotoCropRect | null;
 }): PhotoDecoration {
   const derived = deriveNoteFromTexts(input.texts);
+  const cropRect = normalizeCropRect(input.cropRect);
   return {
     stickers: input.stickers,
     texts: input.texts,
     note: derived.note,
     fontId: derived.fontId,
+    cropRect: isFullCrop(cropRect) ? null : cropRect,
     updatedAt: new Date().toISOString(),
   };
 }

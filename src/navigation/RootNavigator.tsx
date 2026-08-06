@@ -8,8 +8,10 @@ import { DiaryCoverEditScreen } from '../screens/main/DiaryCoverEditScreen';
 import { DiaryEditScreen } from '../screens/main/DiaryEditScreen';
 import { DiaryPhotoEntryScreen } from '../screens/main/DiaryPhotoEntryScreen';
 import { DiaryPhotoGalleryScreen } from '../screens/main/DiaryPhotoGalleryScreen';
+import { DiaryPlacePickScreen } from '../screens/main/DiaryPlacePickScreen';
 import { DiaryRecordDecorateScreen } from '../screens/main/DiaryRecordDecorateScreen';
 import { DiaryRecordDetailScreen } from '../screens/main/DiaryRecordDetailScreen';
+import { ProfileEditScreen } from '../screens/main/ProfileEditScreen';
 import { SettingsScreen } from '../screens/main/SettingsScreen';
 import { AuthNavigator } from './AuthNavigator';
 import { MainTabNavigator } from './MainTabNavigator';
@@ -32,6 +34,13 @@ export function RootNavigator() {
               options={{
                 presentation: 'modal',
                 animation: 'slide_from_bottom',
+              }}
+            />
+            <Stack.Screen
+              name="ProfileEdit"
+              component={ProfileEditScreen}
+              options={{
+                animation: 'slide_from_right',
               }}
             />
             <Stack.Screen
@@ -65,6 +74,13 @@ export function RootNavigator() {
             <Stack.Screen
               name="DiaryEdit"
               component={DiaryEditScreen}
+              options={{
+                animation: 'slide_from_right',
+              }}
+            />
+            <Stack.Screen
+              name="DiaryPlacePick"
+              component={DiaryPlacePickScreen}
               options={{
                 animation: 'slide_from_right',
               }}

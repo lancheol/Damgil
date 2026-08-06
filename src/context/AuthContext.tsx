@@ -16,6 +16,11 @@ export type SignUpPayload = {
   visibility: VisibilityRange;
 };
 
+export type UpdateProfileInput = {
+  username: string;
+  bio: string;
+};
+
 type AuthUser = {
   username: string;
   bio: string;
@@ -28,6 +33,7 @@ type AuthContextValue = {
   user: AuthUser | null;
   signIn: (username: string, password: string) => Promise<void>;
   signUp: (payload: SignUpPayload) => Promise<void>;
+  updateProfile: (input: UpdateProfileInput) => boolean;
   signOut: () => void;
 };
 
@@ -58,6 +64,25 @@ export function AuthProvider({ children }: PropsWithChildren) {
     });
   }, []);
 
+  const updateProfile = useCallback((input: UpdateProfileInput) => {
+    const nextUsername = input.username.trim();
+    if (!nextUsername) {
+      return false;
+    }
+
+    setUser((prev) => {
+      if (!prev) {
+        return prev;
+      }
+      return {
+        ...prev,
+        username: nextUsername,
+        bio: input.bio.trim(),
+      };
+    });
+    return true;
+  }, []);
+
   const signOut = useCallback(() => {
     setUser(null);
   }, []);
@@ -68,9 +93,10 @@ export function AuthProvider({ children }: PropsWithChildren) {
       user,
       signIn,
       signUp,
+      updateProfile,
       signOut,
     }),
-    [user, signIn, signUp, signOut],
+    [user, signIn, signUp, updateProfile, signOut],
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

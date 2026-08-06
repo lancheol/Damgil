@@ -1,7 +1,7 @@
 import { CompositeScreenProps } from '@react-navigation/native';
 import { BottomTabScreenProps } from '@react-navigation/bottom-tabs';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
-import { useMemo, useState } from 'react';
+import { useMemo } from 'react';
 import {
   Dimensions,
   FlatList,
@@ -22,7 +22,7 @@ import { useAuth } from '../../context/AuthContext';
 import { useDiaries } from '../../context/DiaryContext';
 import { MainTabParamList, RootStackParamList } from '../../navigation/types';
 import { Diary } from '../../types/diary';
-import { getEffectiveCover, resolveCoverImageUri } from '../../utils/diaryCover';
+import { getCoverBackgroundColor, getEffectiveCover, resolveCoverImageUri } from '../../utils/diaryCover';
 import { colors, radii, spacing, typography } from '../../theme';
 
 type Props = CompositeScreenProps<
@@ -30,19 +30,9 @@ type Props = CompositeScreenProps<
   NativeStackScreenProps<RootStackParamList>
 >;
 
-type TabKey = 'diaries' | 'saved';
-
 const H_PADDING = 20;
 const GRID_GAP = 12;
 const CARD_WIDTH = (Dimensions.get('window').width - H_PADDING * 2 - GRID_GAP) / 2;
-
-function formatCount(value: number): string {
-  if (value >= 1000) {
-    const shortened = value / 1000;
-    return `${shortened % 1 === 0 ? shortened.toFixed(0) : shortened.toFixed(1)}k`;
-  }
-  return String(value);
-}
 
 function formatDiaryDate(iso: string): string {
   const date = new Date(iso);
@@ -55,47 +45,63 @@ function formatDiaryDate(iso: string): string {
 export function MyPageScreen({ navigation }: Props) {
   const { user } = useAuth();
   const { diaries } = useDiaries();
-  const [tab, setTab] = useState<TabKey>('diaries');
 
   const username = user?.username ?? 'traveler';
   const bio = user?.bio ?? '매주 새로운 곳을 기록하는 다이어리 ✈️';
-  const followerCount = user?.followerCount ?? 0;
-  const followingCount = user?.followingCount ?? 0;
 
   const coverDiaries = useMemo(
     () =>
-      [...diaries].sort(
-        (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime(),
-      ),
+      [...diaries]
+        .filter((diary) => Boolean(diary.endedAt))
+        .sort(
+          (a, b) => new Date(b.endedAt ?? b.createdAt).getTime() - new Date(a.endedAt ?? a.createdAt).getTime(),
+        ),
     [diaries],
   );
 
   const renderDiaryCard = ({ item }: { item: Diary }) => {
     const cover = getEffectiveCover(item);
     const coverUri = resolveCoverImageUri(item, cover);
+    const coverColor = getCoverBackgroundColor(cover);
     const likeCount = item.photos?.length ?? 0;
     const title = cover.title?.trim() || item.name;
+    const isDraft = Boolean(item.coverDraft) && !item.cover;
+    const isPrivate = (item.visibility ?? 'private') === 'private';
 
     return (
       <Pressable
         accessibilityRole="button"
         onPress={() => {
-          if (item.endedAt) {
-            navigation.navigate('DiaryEdit', { diaryId: item.id });
+          if (isDraft) {
+            navigation.navigate('DiaryCoverEdit', { diaryId: item.id });
             return;
           }
-          if ((item.photos?.length ?? 0) > 0) {
-            navigation.navigate('DiaryPhotoGallery', { diaryId: item.id });
-          }
+          navigation.navigate('DiaryEdit', { diaryId: item.id });
         }}
         style={styles.card}
       >
-        <View style={styles.thumb}>
+        <View style={[styles.thumb, { backgroundColor: coverColor }]}>
           {coverUri ? (
             <Image source={{ uri: coverUri }} style={styles.thumbImage} resizeMode="cover" />
           ) : (
-            <View style={styles.thumbPlaceholder} />
+            <View style={styles.thumbTitleWrap}>
+              <Text style={styles.thumbTitle} numberOfLines={3}>
+                {title}
+              </Text>
+            </View>
           )}
+          <View style={styles.badgeRow}>
+            {isPrivate ? (
+              <View style={styles.badge}>
+                <Text style={styles.badgeText}>비공개</Text>
+              </View>
+            ) : null}
+            {isDraft ? (
+              <View style={[styles.badge, styles.badgeDraft]}>
+                <Text style={styles.badgeText}>임시 저장</Text>
+              </View>
+            ) : null}
+          </View>
           <View style={styles.likeBadge}>
             <MyPageHeartIcon size={10} />
             <Text style={styles.likeCount}>{likeCount}</Text>
@@ -104,7 +110,7 @@ export function MyPageScreen({ navigation }: Props) {
         <Text style={styles.cardTitle} numberOfLines={1}>
           {title}
         </Text>
-        <Text style={styles.cardDate}>{formatDiaryDate(item.createdAt)}</Text>
+        <Text style={styles.cardDate}>{formatDiaryDate(item.endedAt ?? item.createdAt)}</Text>
       </Pressable>
     );
   };
@@ -124,7 +130,7 @@ export function MyPageScreen({ navigation }: Props) {
       </View>
 
       <FlatList
-        data={tab === 'diaries' ? coverDiaries : []}
+        data={coverDiaries}
         keyExtractor={(item) => item.id}
         numColumns={2}
         columnWrapperStyle={styles.gridRow}
@@ -138,56 +144,27 @@ export function MyPageScreen({ navigation }: Props) {
               </View>
               <View style={styles.profileCopy}>
                 <Text style={styles.username}>{username}</Text>
-                <Text style={styles.bio} numberOfLines={1}>
+                <Text style={styles.bio} numberOfLines={2}>
                   {bio}
                 </Text>
               </View>
             </View>
 
-            <View style={styles.statsRow}>
-              <View style={styles.statItem}>
-                <Text style={styles.statValue}>{diaries.length}</Text>
-                <Text style={styles.statLabel}>다이어리</Text>
-              </View>
-              <View style={styles.statItem}>
-                <Text style={styles.statValue}>{formatCount(followerCount)}</Text>
-                <Text style={styles.statLabel}>팔로워</Text>
-              </View>
-              <View style={styles.statItem}>
-                <Text style={styles.statValue}>{formatCount(followingCount)}</Text>
-                <Text style={styles.statLabel}>팔로잉</Text>
-              </View>
-            </View>
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel="프로필 편집하기"
+              onPress={() => navigation.navigate('ProfileEdit')}
+              style={({ pressed }) => [styles.editProfileBtn, pressed && styles.pressed]}
+            >
+              <Text style={styles.editProfileText}>프로필 편집하기</Text>
+            </Pressable>
 
-            <View style={styles.tabs}>
-              <Pressable
-                accessibilityRole="button"
-                onPress={() => setTab('diaries')}
-                style={[styles.tab, tab === 'diaries' && styles.tabActive]}
-              >
-                <Text style={[styles.tabText, tab === 'diaries' && styles.tabTextActive]}>
-                  내 다이어리
-                </Text>
-              </Pressable>
-              <Pressable
-                accessibilityRole="button"
-                onPress={() => setTab('saved')}
-                style={[styles.tab, tab === 'saved' && styles.tabActive]}
-              >
-                <Text style={[styles.tabText, tab === 'saved' && styles.tabTextActive]}>
-                  찜한 장소
-                </Text>
-              </Pressable>
-            </View>
+            <View style={styles.profileDivider} />
           </View>
         }
         ListEmptyComponent={
           <View style={styles.empty}>
-            <Text style={styles.emptyText}>
-              {tab === 'diaries'
-                ? '아직 만든 다이어리가 없어요.'
-                : '찜한 장소가 아직 없어요.'}
-            </Text>
+            <Text style={styles.emptyText}>아직 등록된 여행 다이어리가 없어요.</Text>
           </View>
         }
         renderItem={renderDiaryCard}
@@ -230,7 +207,8 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: spacing.md,
-    paddingVertical: spacing.md,
+    paddingTop: spacing.md,
+    paddingBottom: spacing.sm,
   },
   avatar: {
     width: 64,
@@ -255,49 +233,27 @@ const styles = StyleSheet.create({
     fontSize: 12,
     color: '#6A7282',
   },
-  statsRow: {
-    flexDirection: 'row',
-    borderTopWidth: StyleSheet.hairlineWidth,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderColor: '#F3F4F6',
-    paddingVertical: spacing.md,
-  },
-  statItem: {
-    flex: 1,
+  editProfileBtn: {
+    alignSelf: 'stretch',
+    marginTop: spacing.sm,
+    marginBottom: spacing.md,
+    minHeight: 40,
+    borderRadius: radii.sm,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: '#D1D5DC',
+    backgroundColor: colors.white,
     alignItems: 'center',
-    gap: 2,
+    justifyContent: 'center',
   },
-  statValue: {
-    fontSize: 14,
-    fontWeight: '700',
-    color: '#1E2939',
-  },
-  statLabel: {
-    fontSize: 12,
-    color: '#99A1AF',
-  },
-  tabs: {
-    flexDirection: 'row',
-    marginTop: spacing.lg,
-  },
-  tab: {
-    flex: 1,
-    alignItems: 'center',
-    paddingBottom: 14,
-    borderBottomWidth: 2,
-    borderBottomColor: 'transparent',
-  },
-  tabActive: {
-    borderBottomColor: '#1E2939',
-  },
-  tabText: {
-    fontSize: 14,
-    fontWeight: '500',
-    color: '#99A1AF',
-  },
-  tabTextActive: {
+  editProfileText: {
+    fontSize: 13,
     fontWeight: '600',
     color: '#1E2939',
+  },
+  profileDivider: {
+    height: StyleSheet.hairlineWidth,
+    backgroundColor: '#E5E7EB',
+    marginBottom: spacing.sm,
   },
   gridRow: {
     gap: GRID_GAP,
@@ -318,9 +274,40 @@ const styles = StyleSheet.create({
     width: '100%',
     height: '100%',
   },
-  thumbPlaceholder: {
+  thumbTitleWrap: {
     flex: 1,
-    backgroundColor: '#E5E7EB',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 10,
+  },
+  thumbTitle: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: colors.white,
+    textAlign: 'center',
+  },
+  badgeRow: {
+    position: 'absolute',
+    top: 8,
+    left: 8,
+    right: 8,
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 4,
+  },
+  badge: {
+    backgroundColor: 'rgba(0,0,0,0.55)',
+    borderRadius: 4,
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+  },
+  badgeDraft: {
+    backgroundColor: 'rgba(55,55,55,0.75)',
+  },
+  badgeText: {
+    fontSize: 10,
+    fontWeight: '600',
+    color: colors.white,
   },
   likeBadge: {
     position: 'absolute',

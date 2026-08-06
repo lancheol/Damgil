@@ -1,6 +1,7 @@
 import { Ionicons } from '@expo/vector-icons';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 
+import { HomeBookShell } from './HomeBookShell';
 import { colors, radii, spacing, typography } from '../../theme';
 
 const GUIDE_LINES = [
@@ -9,8 +10,8 @@ const GUIDE_LINES = [
   '(c) 나만의 여행 다이어리를 만드세요.',
   '(d) 막막할 땐 AI 여행 코스 추천을 활용하세요.',
   '(e) 가고 싶은 장소와 목적지를 저장하세요.',
-  '(f) 사진과 짧은 메모로 하루를 남겨보세요.',
-  '(g) 다시 펼쳐볼수록 여행이 선명해집니다.',
+  '(f) 여행 다이어리를 편집하며, 여행에서의 하루를 남겨보세요.',
+  '(g) Traveler의 다이어리를 통해 여행을 공유해보세요.',
 ] as const;
 
 type EmptyDiaryCardProps = {
@@ -19,7 +20,7 @@ type EmptyDiaryCardProps = {
 
 export function EmptyDiaryCard({ onPressCreate }: EmptyDiaryCardProps) {
   return (
-    <View style={styles.card}>
+    <HomeBookShell contentStyle={styles.coverContent}>
       <View style={styles.paper}>
         <View style={styles.tape} />
         <Text style={styles.paperTitle}>How to Remember a Trip</Text>
@@ -40,19 +41,12 @@ export function EmptyDiaryCard({ onPressCreate }: EmptyDiaryCardProps) {
       >
         <Ionicons name="add" size={30} color={colors.white} />
       </Pressable>
-    </View>
+    </HomeBookShell>
   );
 }
 
 const styles = StyleSheet.create({
-  card: {
-    flex: 1,
-    backgroundColor: colors.black,
-    borderRadius: radii.xl,
-    marginHorizontal: spacing.xl,
-    paddingHorizontal: spacing.lg,
-    paddingTop: spacing.xxl,
-    paddingBottom: spacing.xxxl,
+  coverContent: {
     alignItems: 'center',
     justifyContent: 'center',
   },

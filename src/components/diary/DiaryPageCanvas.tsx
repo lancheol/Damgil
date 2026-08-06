@@ -1,33 +1,33 @@
 import { useRef } from 'react';
-import {
-  Image,
-  Pressable,
-  StyleSheet,
-  Text,
-  View,
-  ViewStyle,
-} from 'react-native';
+import { Pressable, StyleSheet, View, ViewStyle } from 'react-native';
 
+import { DraggablePhoto } from './DraggablePhoto';
 import { DraggableSticker, useCanvasPinchHandlers } from './DraggableSticker';
 import { DraggableText } from './DraggableText';
-import { DecorSticker, DecorTextLayer, DiaryMediaType, PhotoCropRect } from '../../types/diary';
-import { isFullCrop, normalizeCropRect } from '../../utils/diaryTextLayers';
-import { colors, typography } from '../../theme';
+import {
+  DecorPhotoLayer,
+  DecorSticker,
+  DecorTextLayer,
+  DiaryPhoto,
+} from '../../types/diary';
 
-type RecordDecorCanvasProps = {
-  uri: string;
-  mediaType?: DiaryMediaType;
-  cropRect?: PhotoCropRect | null;
+type DiaryPageCanvasProps = {
+  photos: DecorPhotoLayer[];
+  photoById: Record<string, DiaryPhoto | undefined>;
   stickers: DecorSticker[];
   texts: DecorTextLayer[];
+  selectedPhotoId: string | null;
   selectedStickerId: string | null;
   selectedTextId: string | null;
-  fullBleed?: boolean;
   style?: ViewStyle;
-  onSelectSticker?: (id: string | null) => void;
+  onBackgroundPress?: () => void;
+  onSelectPhoto?: (id: string) => void;
+  onSelectSticker?: (id: string) => void;
   onSelectText?: (id: string) => void;
   onEditText?: (id: string) => void;
-  onBackgroundPress?: () => void;
+  onMovePhoto?: (id: string, x: number, y: number) => void;
+  onScalePhoto?: (id: string, scale: number) => void;
+  onRotatePhoto?: (id: string, rotation: number) => void;
   onMoveSticker?: (id: string, x: number, y: number) => void;
   onScaleSticker?: (id: string, scale: number) => void;
   onRotateSticker?: (id: string, rotation: number) => void;
@@ -36,24 +36,28 @@ type RecordDecorCanvasProps = {
   onRotateText?: (id: string, rotation: number) => void;
   onLayerDragChange?: (dragging: boolean) => void;
   onLayerDragPointer?: (pageX: number, pageY: number) => void;
+  onPhotoDragEnd?: (id: string, pageX?: number, pageY?: number) => void;
   onStickerDragEnd?: (id: string, pageX?: number, pageY?: number) => void;
   onTextDragEnd?: (id: string, pageX?: number, pageY?: number) => void;
 };
 
-export function RecordDecorCanvas({
-  uri,
-  mediaType = 'photo',
-  cropRect,
+export function DiaryPageCanvas({
+  photos,
+  photoById,
   stickers,
   texts,
+  selectedPhotoId,
   selectedStickerId,
   selectedTextId,
-  fullBleed = false,
   style,
+  onBackgroundPress,
+  onSelectPhoto,
   onSelectSticker,
   onSelectText,
   onEditText,
-  onBackgroundPress,
+  onMovePhoto,
+  onScalePhoto,
+  onRotatePhoto,
   onMoveSticker,
   onScaleSticker,
   onRotateSticker,
@@ -62,20 +66,19 @@ export function RecordDecorCanvas({
   onRotateText,
   onLayerDragChange,
   onLayerDragPointer,
+  onPhotoDragEnd,
   onStickerDragEnd,
   onTextDragEnd,
-}: RecordDecorCanvasProps) {
+}: DiaryPageCanvasProps) {
   const layoutRef = useRef({ width: 1, height: 1 });
-  const isVideo = mediaType === 'video';
+  const photosRef = useRef(photos);
   const stickersRef = useRef(stickers);
   const textsRef = useRef(texts);
+  photosRef.current = photos;
   stickersRef.current = stickers;
   textsRef.current = texts;
 
-  const crop = normalizeCropRect(cropRect);
-  const cropped = !isFullCrop(crop);
-
-  const selectedLayerId = selectedTextId ?? selectedStickerId;
+  const selectedLayerId = selectedTextId ?? selectedStickerId ?? selectedPhotoId;
 
   const pinchHandlers = useCanvasPinchHandlers({
     enabled: true,
@@ -83,47 +86,43 @@ export function RecordDecorCanvas({
     getSelectedTransform: () => {
       if (selectedTextId) {
         const text = textsRef.current.find((item) => item.id === selectedTextId);
-        return {
-          scale: text?.scale ?? 1,
-          rotation: text?.rotation ?? 0,
-        };
+        return { scale: text?.scale ?? 1, rotation: text?.rotation ?? 0 };
       }
-      const sticker = stickersRef.current.find((item) => item.id === selectedStickerId);
-      return {
-        scale: sticker?.scale ?? 1,
-        rotation: sticker?.rotation ?? 0,
-      };
+      if (selectedStickerId) {
+        const sticker = stickersRef.current.find((item) => item.id === selectedStickerId);
+        return { scale: sticker?.scale ?? 1, rotation: sticker?.rotation ?? 0 };
+      }
+      const photo = photosRef.current.find((item) => item.id === selectedPhotoId);
+      return { scale: photo?.scale ?? 1, rotation: photo?.rotation ?? 0 };
     },
     onScale: (id, scale) => {
       if (textsRef.current.some((item) => item.id === id)) {
         onScaleText?.(id, scale);
         return;
       }
-      onScaleSticker?.(id, scale);
+      if (stickersRef.current.some((item) => item.id === id)) {
+        onScaleSticker?.(id, scale);
+        return;
+      }
+      onScalePhoto?.(id, scale);
     },
     onRotate: (id, rotation) => {
       if (textsRef.current.some((item) => item.id === id)) {
         onRotateText?.(id, rotation);
         return;
       }
-      onRotateSticker?.(id, rotation);
+      if (stickersRef.current.some((item) => item.id === id)) {
+        onRotateSticker?.(id, rotation);
+        return;
+      }
+      onRotatePhoto?.(id, rotation);
     },
     onDragChange: onLayerDragChange,
   });
 
-  const mediaStyle = cropped
-    ? {
-        position: 'absolute' as const,
-        width: `${(1 / crop.width) * 100}%` as unknown as number,
-        height: `${(1 / crop.height) * 100}%` as unknown as number,
-        left: `${(-crop.x / crop.width) * 100}%` as unknown as number,
-        top: `${(-crop.y / crop.height) * 100}%` as unknown as number,
-      }
-    : styles.media;
-
   return (
     <View
-      style={[styles.canvas, fullBleed && styles.canvasFullBleed, style]}
+      style={[styles.page, style]}
       {...pinchHandlers}
       onLayout={(event) => {
         layoutRef.current = {
@@ -132,17 +131,30 @@ export function RecordDecorCanvas({
         };
       }}
     >
-      <Pressable style={StyleSheet.absoluteFill} onPress={onBackgroundPress}>
-        <View style={styles.mediaClip}>
-          <Image source={{ uri }} style={mediaStyle} resizeMode={cropped ? 'stretch' : 'cover'} />
-        </View>
-      </Pressable>
+      <Pressable style={StyleSheet.absoluteFill} onPress={onBackgroundPress} />
 
-      {isVideo ? (
-        <View style={styles.lockBadge} pointerEvents="none">
-          <Text style={styles.lockBadgeText}>VIDEO</Text>
-        </View>
-      ) : null}
+      {photos.map((layer) => {
+        const source = photoById[layer.photoId];
+        if (!source?.uri) {
+          return null;
+        }
+        return (
+          <DraggablePhoto
+            key={layer.id}
+            layer={layer}
+            uri={source.uri}
+            selected={selectedPhotoId === layer.id}
+            layoutRef={layoutRef}
+            onSelect={() => onSelectPhoto?.(layer.id)}
+            onMove={(x, y) => onMovePhoto?.(layer.id, x, y)}
+            onScale={(scale) => onScalePhoto?.(layer.id, scale)}
+            onRotate={(rotation) => onRotatePhoto?.(layer.id, rotation)}
+            onDragChange={onLayerDragChange}
+            onDragPointer={onLayerDragPointer}
+            onDragEnd={(pageX, pageY) => onPhotoDragEnd?.(layer.id, pageX, pageY)}
+          />
+        );
+      })}
 
       {texts.map((layer) => (
         <DraggableText
@@ -181,40 +193,10 @@ export function RecordDecorCanvas({
 }
 
 const styles = StyleSheet.create({
-  canvas: {
-    width: '100%',
-    aspectRatio: 3 / 4,
-    borderRadius: 16,
-    overflow: 'hidden',
-    backgroundColor: colors.black,
-  },
-  canvasFullBleed: {
+  page: {
     flex: 1,
-    width: '100%',
-    height: '100%',
-    aspectRatio: undefined,
-    borderRadius: 0,
-  },
-  mediaClip: {
-    ...StyleSheet.absoluteFillObject,
-    overflow: 'hidden',
-  },
-  media: {
-    ...StyleSheet.absoluteFillObject,
-  },
-  lockBadge: {
-    position: 'absolute',
-    top: 12,
-    right: 12,
-    paddingHorizontal: 8,
-    paddingVertical: 4,
+    backgroundColor: '#F7F3EA',
     borderRadius: 4,
-    backgroundColor: 'rgba(0,0,0,0.45)',
-  },
-  lockBadgeText: {
-    ...typography.monoBody,
-    fontSize: 10,
-    color: colors.white,
-    letterSpacing: 0.6,
+    overflow: 'hidden',
   },
 });

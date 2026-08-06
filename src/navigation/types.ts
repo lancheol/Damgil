@@ -18,12 +18,14 @@ export type RootStackParamList = {
   Auth: undefined;
   Main: undefined;
   Settings: undefined;
+  ProfileEdit: undefined;
   CreateDiary: undefined;
   DiaryCamera: { diaryId: string };
   DiaryPhotoEntry: { diaryId: string; photoUri: string; mediaType?: 'photo' | 'video' };
   DiaryPhotoGallery: { diaryId: string };
-  DiaryEdit: { diaryId: string };
-  DiaryCoverEdit: { diaryId: string };
+  DiaryEdit: { diaryId: string; placeId?: string };
+  DiaryPlacePick: { diaryId: string };
+  DiaryCoverEdit: { diaryId: string; fromTripEnd?: boolean };
   DiaryRecordDetail: { diaryId: string; photoId: string };
   DiaryRecordDecorate: {
     diaryId: string;

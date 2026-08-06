@@ -20,8 +20,12 @@ import {
   PhotoDecoration,
   SaveDiaryCoverInput,
   SavePhotoDecorationInput,
+  SavePlaceSelectionsInput,
+  SavePlacePageDecorationInput,
 } from '../types/diary';
 import { normalizeCover } from '../utils/diaryCover';
+import { buildPlaceSelections } from '../utils/diaryPlaces';
+import { buildPlacePageDecoration, normalizePlacePageDecoration } from '../utils/diaryPageDecoration';
 import { buildPhotoDecoration, resolveDecorationTexts } from '../utils/diaryTextLayers';
 
 const DIARIES_STORAGE_KEY = '@damgil/diaries/v1';
@@ -31,12 +35,15 @@ type DiaryContextValue = {
   activeDiary: Diary | undefined;
   isReady: boolean;
   createDiary: (input: CreateDiaryInput) => Diary;
+  deleteDiary: (diaryId: string) => boolean;
   addPhotoToDiary: (input: AddDiaryPhotoInput) => DiaryPhoto | null;
   removePhotosFromDiary: (diaryId: string, photoIds: string[]) => boolean;
   endDiary: (diaryId: string) => boolean;
   saveDiaryCover: (input: SaveDiaryCoverInput) => boolean;
   discardCoverDraft: (diaryId: string) => boolean;
   savePhotoDecoration: (input: SavePhotoDecorationInput) => boolean;
+  savePlaceSelections: (input: SavePlaceSelectionsInput) => boolean;
+  savePlacePageDecoration: (input: SavePlacePageDecorationInput) => boolean;
   getDiaryById: (diaryId: string) => Diary | undefined;
 };
 
@@ -54,6 +61,7 @@ function normalizeDecoration(decoration: PhotoDecoration | null | undefined): Ph
   const built = buildPhotoDecoration({
     stickers: Array.isArray(decoration.stickers) ? decoration.stickers : [],
     texts,
+    cropRect: decoration.cropRect,
   });
   return {
     ...built,
@@ -65,6 +73,19 @@ function normalizeDiary(diary: Diary): Diary {
   return {
     ...diary,
     endedAt: diary.endedAt ?? null,
+    visibility: diary.visibility ?? 'private',
+    placesSetupAt: diary.placesSetupAt ?? null,
+    placeSelections: Array.isArray(diary.placeSelections)
+      ? diary.placeSelections.map((selection) => ({
+          ...selection,
+          pageDecoration: selection.pageDecoration
+            ? normalizePlacePageDecoration(
+                selection.pageDecoration,
+                selection.representativePhotoId,
+              )
+            : null,
+        }))
+      : null,
     cover: normalizeCover(diary.cover, diary.name),
     coverDraft: normalizeCover(diary.coverDraft, diary.name),
     photos: Array.isArray(diary.photos)
@@ -144,6 +165,7 @@ export function DiaryProvider({ children }: PropsWithChildren) {
       photos: [],
       cover: null,
       coverDraft: null,
+      visibility: 'private',
     };
 
     hasMutatedRef.current = true;
@@ -151,13 +173,34 @@ export function DiaryProvider({ children }: PropsWithChildren) {
     return diary;
   }, []);
 
+  const deleteDiary = useCallback(
+    (diaryId: string) => {
+      const exists = diaries.some((diary) => diary.id === diaryId);
+      if (!exists) {
+        return false;
+      }
+
+      hasMutatedRef.current = true;
+      setDiaries((prev) => prev.filter((diary) => diary.id !== diaryId));
+      return true;
+    },
+    [diaries],
+  );
+
   const addPhotoToDiary = useCallback(
     (input: AddDiaryPhotoInput) => {
       const target = diaries.find((diary) => diary.id === input.diaryId);
-      if (!target || target.endedAt) {
+      if (!target) {
         Alert.alert(
           '저장 실패',
           '다이어리를 찾지 못해 사진을 저장하지 못했습니다. 홈에서 다이어리를 다시 만든 뒤 촬영해 주세요.',
+        );
+        return null;
+      }
+      if (target.endedAt && !input.allowAfterEnd) {
+        Alert.alert(
+          '저장 실패',
+          '종료된 여행에는 새 촬영물을 추가할 수 없어요. 꾸미기에서 갤러리 사진을 사용해 주세요.',
         );
         return null;
       }
@@ -231,6 +274,8 @@ export function DiaryProvider({ children }: PropsWithChildren) {
         return false;
       }
 
+      const selections = buildPlaceSelections(target.photos ?? []);
+
       hasMutatedRef.current = true;
       setDiaries((prev) =>
         prev.map((diary) =>
@@ -238,6 +283,9 @@ export function DiaryProvider({ children }: PropsWithChildren) {
             ? {
                 ...diary,
                 endedAt: new Date().toISOString(),
+                visibility: 'private',
+                placeSelections: selections,
+                placesSetupAt: selections.length > 0 ? new Date().toISOString() : null,
               }
             : diary,
         ),
@@ -268,6 +316,7 @@ export function DiaryProvider({ children }: PropsWithChildren) {
             return {
               ...diary,
               coverDraft: nextCover,
+              visibility: 'private',
             };
           }
 
@@ -276,6 +325,7 @@ export function DiaryProvider({ children }: PropsWithChildren) {
             name: nextCover.title.trim() || diary.name,
             cover: nextCover,
             coverDraft: null,
+            visibility: diary.visibility ?? 'private',
           };
         }),
       );
@@ -328,6 +378,7 @@ export function DiaryProvider({ children }: PropsWithChildren) {
       const nextDecoration = buildPhotoDecoration({
         stickers: input.decoration.stickers ?? [],
         texts,
+        cropRect: input.decoration.cropRect,
       });
 
       hasMutatedRef.current = true;
@@ -356,6 +407,81 @@ export function DiaryProvider({ children }: PropsWithChildren) {
     [diaries],
   );
 
+  const savePlaceSelections = useCallback(
+    (input: SavePlaceSelectionsInput) => {
+      const target = diaries.find((diary) => diary.id === input.diaryId);
+      if (!target || !target.endedAt) {
+        return false;
+      }
+      if (!input.selections.length) {
+        return false;
+      }
+      const incomplete = input.selections.some(
+        (s) => !s.representativePhotoId || !s.photoIds.includes(s.representativePhotoId),
+      );
+      if (incomplete) {
+        return false;
+      }
+
+      hasMutatedRef.current = true;
+      setDiaries((prev) =>
+        prev.map((diary) =>
+          diary.id === input.diaryId
+            ? {
+                ...diary,
+                placeSelections: input.selections,
+                placesSetupAt: new Date().toISOString(),
+              }
+            : diary,
+        ),
+      );
+      return true;
+    },
+    [diaries],
+  );
+
+  const savePlacePageDecoration = useCallback(
+    (input: SavePlacePageDecorationInput) => {
+      const target = diaries.find((diary) => diary.id === input.diaryId);
+      if (!target) {
+        return false;
+      }
+      const placeExists = (target.placeSelections ?? []).some(
+        (place) => place.id === input.placeId,
+      );
+      if (!placeExists) {
+        return false;
+      }
+
+      const next = buildPlacePageDecoration({
+        photos: input.decoration.photos ?? [],
+        stickers: input.decoration.stickers ?? [],
+        texts: input.decoration.texts ?? [],
+      });
+
+      hasMutatedRef.current = true;
+      setDiaries((prev) =>
+        prev.map((diary) =>
+          diary.id === input.diaryId
+            ? {
+                ...diary,
+                placeSelections: (diary.placeSelections ?? []).map((place) =>
+                  place.id === input.placeId
+                    ? {
+                        ...place,
+                        pageDecoration: next,
+                      }
+                    : place,
+                ),
+              }
+            : diary,
+        ),
+      );
+      return true;
+    },
+    [diaries],
+  );
+
   const getDiaryById = useCallback(
     (diaryId: string) => diaries.find((diary) => diary.id === diaryId),
     [diaries],
@@ -369,12 +495,15 @@ export function DiaryProvider({ children }: PropsWithChildren) {
       activeDiary,
       isReady,
       createDiary,
+      deleteDiary,
       addPhotoToDiary,
       removePhotosFromDiary,
       endDiary,
       saveDiaryCover,
       discardCoverDraft,
       savePhotoDecoration,
+      savePlaceSelections,
+      savePlacePageDecoration,
       getDiaryById,
     }),
     [
@@ -382,12 +511,15 @@ export function DiaryProvider({ children }: PropsWithChildren) {
       activeDiary,
       isReady,
       createDiary,
+      deleteDiary,
       addPhotoToDiary,
       removePhotosFromDiary,
       endDiary,
       saveDiaryCover,
       discardCoverDraft,
       savePhotoDecoration,
+      savePlaceSelections,
+      savePlacePageDecoration,
       getDiaryById,
     ],
   );

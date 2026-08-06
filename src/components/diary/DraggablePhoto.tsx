@@ -1,22 +1,25 @@
-import { MutableRefObject, useRef, useState } from 'react';
+import { MutableRefObject, useRef } from 'react';
 import {
   GestureResponderEvent,
+  Image,
   NativeTouchEvent,
   PanResponder,
   StyleSheet,
-  Text,
   View,
 } from 'react-native';
 
-import { clampStickerScale, normalizeRotation } from './DraggableSticker';
-import { DecorTextLayer } from '../../types/diary';
-import { getDecorFontStyle } from '../../utils/decorAssets';
+import {
+  clampStickerScale,
+  normalizeRotation,
+} from './DraggableSticker';
+import { DecorPhotoLayer, PhotoCropRect } from '../../types/diary';
+import { isFullCrop, normalizeCropRect } from '../../utils/diaryTextLayers';
 import { colors } from '../../theme';
 
-type DraggableTextProps = {
-  layer: DecorTextLayer;
+type DraggablePhotoProps = {
+  layer: DecorPhotoLayer;
+  uri: string;
   selected: boolean;
-  editable?: boolean;
   layoutRef: MutableRefObject<{ width: number; height: number }>;
   onSelect: () => void;
   onMove: (x: number, y: number) => void;
@@ -24,7 +27,6 @@ type DraggableTextProps = {
   onRotate: (rotation: number) => void;
   onDragChange?: (dragging: boolean) => void;
   onDragEnd?: (pageX?: number, pageY?: number) => void;
-  onEditRequest?: () => void;
   onDragPointer?: (pageX: number, pageY: number) => void;
 };
 
@@ -57,10 +59,27 @@ function shortestAngleDelta(from: number, to: number): number {
   return delta;
 }
 
-export function DraggableText({
+function mediaStyleForCrop(cropRect?: PhotoCropRect | null) {
+  const crop = normalizeCropRect(cropRect);
+  if (isFullCrop(crop)) {
+    return styles.mediaFill;
+  }
+  return {
+    position: 'absolute' as const,
+    width: `${(1 / crop.width) * 100}%` as unknown as number,
+    height: `${(1 / crop.height) * 100}%` as unknown as number,
+    left: `${(-crop.x / crop.width) * 100}%` as unknown as number,
+    top: `${(-crop.y / crop.height) * 100}%` as unknown as number,
+  };
+}
+
+const BASE_W = 150;
+const BASE_H = 190;
+
+export function DraggablePhoto({
   layer,
+  uri,
   selected,
-  editable = true,
   layoutRef,
   onSelect,
   onMove,
@@ -68,16 +87,13 @@ export function DraggableText({
   onRotate,
   onDragChange,
   onDragEnd,
-  onEditRequest,
   onDragPointer,
-}: DraggableTextProps) {
+}: DraggablePhotoProps) {
   const layerRef = useRef(layer);
   layerRef.current = layer;
-  const [box, setBox] = useState({ width: 120, height: 40 });
 
   const modeRef = useRef<'move' | 'pinch'>('move');
   const lastPageRef = useRef({ x: 0, y: 0 });
-  const movedRef = useRef(false);
   const pinchStartDistRef = useRef(1);
   const pinchStartScaleRef = useRef(1);
   const pinchStartAngleRef = useRef(0);
@@ -89,22 +105,17 @@ export function DraggableText({
   const onRotateRef = useRef(onRotate);
   const onDragChangeRef = useRef(onDragChange);
   const onDragEndRef = useRef(onDragEnd);
-  const onEditRequestRef = useRef(onEditRequest);
   const onDragPointerRef = useRef(onDragPointer);
-  const selectedRef = useRef(selected);
   onSelectRef.current = onSelect;
   onMoveRef.current = onMove;
   onScaleRef.current = onScale;
   onRotateRef.current = onRotate;
   onDragChangeRef.current = onDragChange;
   onDragEndRef.current = onDragEnd;
-  onEditRequestRef.current = onEditRequest;
   onDragPointerRef.current = onDragPointer;
-  selectedRef.current = selected;
 
   const beginPinch = (touches: NativeTouchEvent[]) => {
     modeRef.current = 'pinch';
-    movedRef.current = true;
     pinchStartDistRef.current = touchDistance(touches);
     pinchStartScaleRef.current = layerRef.current.scale;
     pinchStartAngleRef.current = touchAngle(touches);
@@ -113,29 +124,28 @@ export function DraggableText({
 
   const applyPinch = (touches: NativeTouchEvent[]) => {
     const dist = touchDistance(touches);
-    onScaleRef.current(
-      clampStickerScale(pinchStartScaleRef.current * (dist / Math.max(pinchStartDistRef.current, 1))),
+    const nextScale = clampStickerScale(
+      pinchStartScaleRef.current * (dist / Math.max(pinchStartDistRef.current, 1)),
     );
+    onScaleRef.current(nextScale);
     const angleDelta = shortestAngleDelta(pinchStartAngleRef.current, touchAngle(touches));
     onRotateRef.current(normalizeRotation(pinchStartRotationRef.current + angleDelta));
   };
 
   const panResponder = useRef(
     PanResponder.create({
-      onStartShouldSetPanResponder: () => editable,
-      onStartShouldSetPanResponderCapture: () => editable,
-      onMoveShouldSetPanResponder: () => editable,
-      onMoveShouldSetPanResponderCapture: () => editable,
+      onStartShouldSetPanResponder: () => true,
+      onStartShouldSetPanResponderCapture: () => true,
+      onMoveShouldSetPanResponder: () => true,
+      onMoveShouldSetPanResponderCapture: () => true,
       onPanResponderTerminationRequest: () => false,
       onShouldBlockNativeResponder: () => true,
       onPanResponderGrant: (event: GestureResponderEvent) => {
         const { touches, pageX, pageY } = event.nativeEvent;
         lastPageRef.current = { x: pageX, y: pageY };
-        movedRef.current = false;
         onDragChangeRef.current?.(true);
         onDragPointerRef.current?.(pageX, pageY);
         onSelectRef.current();
-
         if (touches.length >= 2) {
           beginPinch(touches);
         } else {
@@ -145,7 +155,6 @@ export function DraggableText({
       onPanResponderMove: (event: GestureResponderEvent) => {
         const { touches, pageX, pageY } = event.nativeEvent;
         onDragPointerRef.current?.(pageX, pageY);
-
         if (touches.length >= 2) {
           if (modeRef.current !== 'pinch') {
             beginPinch(touches);
@@ -153,36 +162,25 @@ export function DraggableText({
           applyPinch(touches);
           return;
         }
-
         if (modeRef.current === 'pinch') {
           modeRef.current = 'move';
           lastPageRef.current = { x: pageX, y: pageY };
           return;
         }
-
         const { width, height } = layoutRef.current;
         const dx = (pageX - lastPageRef.current.x) / Math.max(width, 1);
         const dy = (pageY - lastPageRef.current.y) / Math.max(height, 1);
-        if (Math.abs(dx) > 0.002 || Math.abs(dy) > 0.002) {
-          movedRef.current = true;
-        }
         lastPageRef.current = { x: pageX, y: pageY };
-
         const nextX = Math.min(0.92, Math.max(0.08, layerRef.current.x + dx));
         const nextY = Math.min(0.92, Math.max(0.08, layerRef.current.y + dy));
         onMoveRef.current(nextX, nextY);
       },
       onPanResponderRelease: (event) => {
         const { pageX, pageY } = event.nativeEvent;
-        const wasSelected = selectedRef.current;
-        const didMove = movedRef.current;
         modeRef.current = 'move';
         onDragPointerRef.current?.(pageX, pageY);
         onDragEndRef.current?.(pageX, pageY);
         onDragChangeRef.current?.(false);
-        if (wasSelected && !didMove) {
-          onEditRequestRef.current?.();
-        }
       },
       onPanResponderTerminate: (event) => {
         const { pageX, pageY } = event.nativeEvent;
@@ -198,38 +196,33 @@ export function DraggableText({
     }),
   ).current;
 
-  const label = layer.content.trim() || '텍스트';
+  const cropped = !isFullCrop(layer.cropRect);
 
   return (
     <View
-      {...(editable ? panResponder.panHandlers : {})}
-      onLayout={(event) => {
-        const { width, height } = event.nativeEvent.layout;
-        if (width > 0 && height > 0 && (width !== box.width || height !== box.height)) {
-          setBox({ width, height });
-        }
-      }}
+      {...panResponder.panHandlers}
       style={[
         styles.hit,
         {
+          width: BASE_W,
+          height: BASE_H,
           left: `${layer.x * 100}%` as unknown as number,
           top: `${layer.y * 100}%` as unknown as number,
-          marginLeft: -box.width / 2,
-          marginTop: -box.height / 2,
+          marginLeft: -BASE_W / 2,
+          marginTop: -BASE_H / 2,
           transform: [{ scale: layer.scale }, { rotate: `${layer.rotation}deg` }],
+          zIndex: selected ? 20 : 5,
         },
       ]}
     >
-      <View style={[styles.visual, selected && editable ? styles.selected : null]}>
-        <Text
-          style={[
-            styles.text,
-            getDecorFontStyle(layer.fontId),
-            { color: layer.color },
-          ]}
-        >
-          {label}
-        </Text>
+      <View style={[styles.frame, selected && styles.frameSelected]}>
+        <View style={styles.mediaClip}>
+          <Image
+            source={{ uri }}
+            style={mediaStyleForCrop(layer.cropRect)}
+            resizeMode={cropped ? 'stretch' : 'cover'}
+          />
+        </View>
       </View>
     </View>
   );
@@ -238,23 +231,28 @@ export function DraggableText({
 const styles = StyleSheet.create({
   hit: {
     position: 'absolute',
-    alignItems: 'center',
-    justifyContent: 'center',
   },
-  visual: {
-    paddingHorizontal: 10,
-    paddingVertical: 6,
-    borderRadius: 8,
-    maxWidth: 280,
+  frame: {
+    flex: 1,
+    borderRadius: 4,
+    overflow: 'hidden',
+    backgroundColor: '#E8E8E8',
+    borderWidth: 2,
+    borderColor: 'transparent',
   },
-  selected: {
-    borderWidth: 1,
+  frameSelected: {
     borderColor: colors.white,
-    backgroundColor: 'rgba(255,255,255,0.12)',
+    shadowColor: '#000',
+    shadowOpacity: 0.35,
+    shadowRadius: 6,
+    shadowOffset: { width: 0, height: 2 },
+    elevation: 4,
   },
-  text: {
-    fontSize: 22,
-    lineHeight: 30,
-    textAlign: 'center',
+  mediaClip: {
+    ...StyleSheet.absoluteFillObject,
+    overflow: 'hidden',
+  },
+  mediaFill: {
+    ...StyleSheet.absoluteFillObject,
   },
 });
