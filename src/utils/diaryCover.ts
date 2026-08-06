@@ -1,7 +1,16 @@
 import { TextStyle } from 'react-native';
 
-import { CoverFontId, Diary, DiaryCover, DiaryPhoto } from '../types/diary';
+import {
+  CoverFontId,
+  DecorPhotoLayer,
+  DecorTextLayer,
+  Diary,
+  DiaryCover,
+  DiaryPhoto,
+} from '../types/diary';
 import { DECOR_FONTS, DECOR_STICKER_EMOJIS, getDecorFontStyle } from './decorAssets';
+import { createPhotoLayerId } from './diaryPageDecoration';
+import { normalizeCropRect } from './diaryTextLayers';
 
 export const COVER_FONTS = DECOR_FONTS;
 export const COVER_STICKER_EMOJIS = DECOR_STICKER_EMOJIS;
@@ -22,12 +31,33 @@ export const COVER_COLORS = [
   '#F5F5F5',
 ] as const;
 
+function normalizeCoverPhotos(photos: DecorPhotoLayer[] | undefined): DecorPhotoLayer[] {
+  if (!Array.isArray(photos)) {
+    return [];
+  }
+  return photos.map((item) => ({
+    id: item.id || createPhotoLayerId(),
+    photoId: item.photoId,
+    x: typeof item.x === 'number' ? item.x : 0.5,
+    y: typeof item.y === 'number' ? item.y : 0.42,
+    scale: typeof item.scale === 'number' ? item.scale : 0.72,
+    rotation: typeof item.rotation === 'number' ? item.rotation : 0,
+    cropRect: item.cropRect ? normalizeCropRect(item.cropRect) : null,
+  }));
+}
+
+function normalizeCoverTexts(texts: DecorTextLayer[] | undefined): DecorTextLayer[] {
+  return Array.isArray(texts) ? texts : [];
+}
+
 export function createEmptyCover(title: string): DiaryCover {
   return {
     coverPhotoId: null,
     title,
     fontId: 'sans',
     stickers: [],
+    photos: [],
+    texts: [],
     backgroundColor: DEFAULT_COVER_COLOR,
     updatedAt: new Date().toISOString(),
   };
@@ -87,6 +117,8 @@ export function normalizeCover(cover: DiaryCover | null | undefined, fallbackTit
     title: cover.title?.trim() || fallbackTitle,
     fontId: cover.fontId ?? 'sans',
     stickers: Array.isArray(cover.stickers) ? cover.stickers : [],
+    photos: normalizeCoverPhotos(cover.photos),
+    texts: normalizeCoverTexts(cover.texts),
     backgroundColor: cover.backgroundColor?.trim() || DEFAULT_COVER_COLOR,
     updatedAt: cover.updatedAt ?? new Date().toISOString(),
   };

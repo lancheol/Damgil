@@ -195,8 +195,8 @@ export function DiaryPageCanvas({
 const styles = StyleSheet.create({
   page: {
     flex: 1,
-    backgroundColor: '#F7F3EA',
-    borderRadius: 4,
+    backgroundColor: '#FFFFFF',
+    borderRadius: 2,
     overflow: 'hidden',
   },
 });

@@ -1,3 +1,5 @@
+import { NavigatorScreenParams } from '@react-navigation/native';
+
 export type TermsType = 'service' | 'privacy';
 
 export type AuthStackParamList = {
@@ -16,7 +18,7 @@ export type MainTabParamList = {
 
 export type RootStackParamList = {
   Auth: undefined;
-  Main: undefined;
+  Main: NavigatorScreenParams<MainTabParamList> | undefined;
   Settings: undefined;
   ProfileEdit: undefined;
   CreateDiary: undefined;

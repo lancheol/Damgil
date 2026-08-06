@@ -1,8 +1,16 @@
 import { useRef } from 'react';
-import { Image, StyleSheet, Text, View, ViewStyle } from 'react-native';
+import { Pressable, StyleSheet, Text, View, ViewStyle } from 'react-native';
 
+import { DraggablePhoto } from './DraggablePhoto';
 import { DraggableSticker, useCanvasPinchHandlers } from './DraggableSticker';
-import { CoverFontId, CoverSticker } from '../../types/diary';
+import { DraggableText } from './DraggableText';
+import {
+  CoverFontId,
+  DecorPhotoLayer,
+  DecorSticker,
+  DecorTextLayer,
+  DiaryPhoto,
+} from '../../types/diary';
 import {
   DEFAULT_COVER_COLOR,
   getCoverFontStyle,
@@ -10,60 +18,134 @@ import {
 } from '../../utils/diaryCover';
 
 type CoverCanvasProps = {
-  imageUri?: string | null;
   backgroundColor?: string;
   title: string;
   fontId: CoverFontId;
-  stickers: CoverSticker[];
+  photos: DecorPhotoLayer[];
+  photoById: Record<string, DiaryPhoto | undefined>;
+  stickers: DecorSticker[];
+  texts: DecorTextLayer[];
+  selectedPhotoId: string | null;
   selectedStickerId: string | null;
+  selectedTextId: string | null;
+  /** 책 껍데기 안에서 꽉 채울 때 */
+  fill?: boolean;
   editable?: boolean;
   style?: ViewStyle;
-  onSelectSticker?: (id: string | null) => void;
+  onBackgroundPress?: () => void;
+  onSelectPhoto?: (id: string) => void;
+  onSelectSticker?: (id: string) => void;
+  onSelectText?: (id: string) => void;
+  onEditText?: (id: string) => void;
+  onMovePhoto?: (id: string, x: number, y: number) => void;
+  onScalePhoto?: (id: string, scale: number) => void;
+  onRotatePhoto?: (id: string, rotation: number) => void;
   onMoveSticker?: (id: string, x: number, y: number) => void;
   onScaleSticker?: (id: string, scale: number) => void;
   onRotateSticker?: (id: string, rotation: number) => void;
-  onStickerDragChange?: (dragging: boolean) => void;
+  onMoveText?: (id: string, x: number, y: number) => void;
+  onScaleText?: (id: string, scale: number) => void;
+  onRotateText?: (id: string, rotation: number) => void;
+  onLayerDragChange?: (dragging: boolean) => void;
+  onLayerDragPointer?: (pageX: number, pageY: number) => void;
+  onPhotoDragEnd?: (id: string, pageX?: number, pageY?: number) => void;
+  onStickerDragEnd?: (id: string, pageX?: number, pageY?: number) => void;
+  onTextDragEnd?: (id: string, pageX?: number, pageY?: number) => void;
 };
 
 export function CoverCanvas({
-  imageUri = null,
   backgroundColor = DEFAULT_COVER_COLOR,
   title,
   fontId,
+  photos,
+  photoById,
   stickers,
+  texts,
+  selectedPhotoId,
   selectedStickerId,
-  editable = false,
+  selectedTextId,
+  fill = false,
+  editable = true,
   style,
+  onBackgroundPress,
+  onSelectPhoto,
   onSelectSticker,
+  onSelectText,
+  onEditText,
+  onMovePhoto,
+  onScalePhoto,
+  onRotatePhoto,
   onMoveSticker,
   onScaleSticker,
   onRotateSticker,
-  onStickerDragChange,
+  onMoveText,
+  onScaleText,
+  onRotateText,
+  onLayerDragChange,
+  onLayerDragPointer,
+  onPhotoDragEnd,
+  onStickerDragEnd,
+  onTextDragEnd,
 }: CoverCanvasProps) {
   const layoutRef = useRef({ width: 1, height: 1 });
+  const photosRef = useRef(photos);
   const stickersRef = useRef(stickers);
+  const textsRef = useRef(texts);
+  photosRef.current = photos;
   stickersRef.current = stickers;
+  textsRef.current = texts;
 
   const titleColor = getCoverTitleColor(backgroundColor);
+  const selectedLayerId = selectedTextId ?? selectedStickerId ?? selectedPhotoId;
 
   const pinchHandlers = useCanvasPinchHandlers({
     enabled: editable,
-    selectedStickerId,
+    selectedStickerId: selectedLayerId,
     getSelectedTransform: () => {
-      const selected = stickersRef.current.find((item) => item.id === selectedStickerId);
-      return {
-        scale: selected?.scale ?? 1,
-        rotation: selected?.rotation ?? 0,
-      };
+      if (selectedTextId) {
+        const text = textsRef.current.find((item) => item.id === selectedTextId);
+        return { scale: text?.scale ?? 1, rotation: text?.rotation ?? 0 };
+      }
+      if (selectedStickerId) {
+        const sticker = stickersRef.current.find((item) => item.id === selectedStickerId);
+        return { scale: sticker?.scale ?? 1, rotation: sticker?.rotation ?? 0 };
+      }
+      const photo = photosRef.current.find((item) => item.id === selectedPhotoId);
+      return { scale: photo?.scale ?? 1, rotation: photo?.rotation ?? 0 };
     },
-    onScale: (id, scale) => onScaleSticker?.(id, scale),
-    onRotate: (id, rotation) => onRotateSticker?.(id, rotation),
-    onDragChange: onStickerDragChange,
+    onScale: (id, scale) => {
+      if (textsRef.current.some((item) => item.id === id)) {
+        onScaleText?.(id, scale);
+        return;
+      }
+      if (stickersRef.current.some((item) => item.id === id)) {
+        onScaleSticker?.(id, scale);
+        return;
+      }
+      onScalePhoto?.(id, scale);
+    },
+    onRotate: (id, rotation) => {
+      if (textsRef.current.some((item) => item.id === id)) {
+        onRotateText?.(id, rotation);
+        return;
+      }
+      if (stickersRef.current.some((item) => item.id === id)) {
+        onRotateSticker?.(id, rotation);
+        return;
+      }
+      onRotatePhoto?.(id, rotation);
+    },
+    onDragChange: onLayerDragChange,
   });
 
   return (
     <View
-      style={[styles.canvas, { backgroundColor }, style]}
+      style={[
+        styles.canvas,
+        fill ? styles.canvasFill : styles.canvasCard,
+        { backgroundColor },
+        style,
+      ]}
       {...(editable ? pinchHandlers : {})}
       onLayout={(event) => {
         layoutRef.current = {
@@ -72,8 +154,8 @@ export function CoverCanvas({
         };
       }}
     >
-      {imageUri ? (
-        <Image source={{ uri: imageUri }} style={styles.image} resizeMode="cover" />
+      {editable ? (
+        <Pressable style={StyleSheet.absoluteFill} onPress={onBackgroundPress} />
       ) : null}
 
       <View style={styles.titleWrap} pointerEvents="none">
@@ -85,18 +167,61 @@ export function CoverCanvas({
         </Text>
       </View>
 
+      {photos.map((layer) => {
+        const source = photoById[layer.photoId];
+        if (!source?.uri) {
+          return null;
+        }
+        return (
+          <DraggablePhoto
+            key={layer.id}
+            layer={layer}
+            uri={source.uri}
+            selected={editable && selectedPhotoId === layer.id}
+            layoutRef={layoutRef}
+            onSelect={() => onSelectPhoto?.(layer.id)}
+            onMove={(x, y) => onMovePhoto?.(layer.id, x, y)}
+            onScale={(scale) => onScalePhoto?.(layer.id, scale)}
+            onRotate={(rotation) => onRotatePhoto?.(layer.id, rotation)}
+            onDragChange={onLayerDragChange}
+            onDragPointer={onLayerDragPointer}
+            onDragEnd={(pageX, pageY) => onPhotoDragEnd?.(layer.id, pageX, pageY)}
+          />
+        );
+      })}
+
+      {texts.map((layer) => (
+        <DraggableText
+          key={layer.id}
+          layer={layer}
+          selected={editable && selectedTextId === layer.id}
+          editable={editable}
+          layoutRef={layoutRef}
+          onSelect={() => onSelectText?.(layer.id)}
+          onEditRequest={() => onEditText?.(layer.id)}
+          onMove={(x, y) => onMoveText?.(layer.id, x, y)}
+          onScale={(scale) => onScaleText?.(layer.id, scale)}
+          onRotate={(rotation) => onRotateText?.(layer.id, rotation)}
+          onDragChange={onLayerDragChange}
+          onDragPointer={onLayerDragPointer}
+          onDragEnd={(pageX, pageY) => onTextDragEnd?.(layer.id, pageX, pageY)}
+        />
+      ))}
+
       {stickers.map((sticker) => (
         <DraggableSticker
           key={sticker.id}
           sticker={sticker}
-          selected={selectedStickerId === sticker.id}
+          selected={editable && selectedStickerId === sticker.id}
           editable={editable}
           layoutRef={layoutRef}
           onSelect={() => onSelectSticker?.(sticker.id)}
           onMove={(x, y) => onMoveSticker?.(sticker.id, x, y)}
           onScale={(scale) => onScaleSticker?.(sticker.id, scale)}
           onRotate={(rotation) => onRotateSticker?.(sticker.id, rotation)}
-          onDragChange={onStickerDragChange}
+          onDragChange={onLayerDragChange}
+          onDragPointer={onLayerDragPointer}
+          onDragEnd={(pageX, pageY) => onStickerDragEnd?.(sticker.id, pageX, pageY)}
         />
       ))}
     </View>
@@ -106,18 +231,22 @@ export function CoverCanvas({
 const styles = StyleSheet.create({
   canvas: {
     width: '100%',
-    aspectRatio: 3 / 4,
-    borderRadius: 16,
     overflow: 'hidden',
   },
-  image: {
-    ...StyleSheet.absoluteFillObject,
+  canvasCard: {
+    aspectRatio: 3 / 4,
+    borderRadius: 16,
+  },
+  canvasFill: {
+    flex: 1,
+    borderRadius: 0,
   },
   titleWrap: {
     ...StyleSheet.absoluteFillObject,
     alignItems: 'center',
     justifyContent: 'center',
     paddingHorizontal: 28,
+    zIndex: 1,
   },
   title: {
     fontSize: 28,

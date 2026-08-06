@@ -7,25 +7,66 @@ type HomeBookShellProps = {
   children: ReactNode;
   style?: StyleProp<ViewStyle>;
   contentStyle?: StyleProp<ViewStyle>;
+  /** 표지 꾸미기에서 고른 책껍데기 색 */
+  coverColor?: string;
+  /** 책등 너비 (기본 28) */
+  spineWidth?: number;
+  /** 책등 왼쪽 이동 (음수면 왼쪽으로) */
+  spineOffsetX?: number;
+  /** 책등 안쪽 세로 줄 숨김 */
+  hideSpineRidges?: boolean;
+  /** 꾸미기용: 맨 앞 페이지 엣지 숨김 (캔버스가 그 자리를 대체) */
+  hideFrontPageEdge?: boolean;
+  /** 꾸미기용: 오른쪽 겹친 페이지 엣지 전체 숨김 */
+  hidePageEdge?: boolean;
 };
 
 /** 홈 검정 블록용 책 형태(책등·페이지 엣지) */
-export function HomeBookShell({ children, style, contentStyle }: HomeBookShellProps) {
+export function HomeBookShell({
+  children,
+  style,
+  contentStyle,
+  coverColor,
+  spineWidth,
+  spineOffsetX,
+  hideSpineRidges = false,
+  hideFrontPageEdge = false,
+  hidePageEdge = false,
+}: HomeBookShellProps) {
+  const shellColor = coverColor?.trim() || undefined;
+
   return (
-    <View style={[styles.book, style]}>
-      <View style={styles.spine}>
-        <View style={styles.spineRidge} />
-        <View style={styles.spineRidge} />
-        <View style={styles.spineRidge} />
+    <View style={[styles.book, shellColor ? { backgroundColor: shellColor } : null, style]}>
+      <View
+        style={[
+          styles.spine,
+          typeof spineWidth === 'number' ? { width: spineWidth } : null,
+          typeof spineOffsetX === 'number' ? { marginLeft: spineOffsetX } : null,
+          shellColor
+            ? { backgroundColor: shellColor, borderRightColor: 'rgba(0,0,0,0.18)' }
+            : null,
+        ]}
+      >
+        {hideSpineRidges ? null : (
+          <>
+            <View style={styles.spineRidge} />
+            <View style={styles.spineRidge} />
+            <View style={styles.spineRidge} />
+          </>
+        )}
       </View>
 
       <View style={[styles.cover, contentStyle]}>{children}</View>
 
-      <View pointerEvents="none" style={styles.pageEdge}>
-        <View style={[styles.pageSheet, styles.pageSheetBack]} />
-        <View style={[styles.pageSheet, styles.pageSheetMid]} />
-        <View style={[styles.pageSheet, styles.pageSheetFront]} />
-      </View>
+      {hidePageEdge ? null : (
+        <View pointerEvents="none" style={styles.pageEdge}>
+          <View style={[styles.pageSheet, styles.pageSheetBack]} />
+          <View style={[styles.pageSheet, styles.pageSheetMid]} />
+          {hideFrontPageEdge ? null : (
+            <View style={[styles.pageSheet, styles.pageSheetFront]} />
+          )}
+        </View>
+      )}
     </View>
   );
 }

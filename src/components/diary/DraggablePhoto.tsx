@@ -13,7 +13,7 @@ import {
   normalizeRotation,
 } from './DraggableSticker';
 import { DecorPhotoLayer, PhotoCropRect } from '../../types/diary';
-import { isFullCrop, normalizeCropRect } from '../../utils/diaryTextLayers';
+import { normalizeCropRect } from '../../utils/diaryTextLayers';
 import { colors } from '../../theme';
 
 type DraggablePhotoProps = {
@@ -59,22 +59,28 @@ function shortestAngleDelta(from: number, to: number): number {
   return delta;
 }
 
-function mediaStyleForCrop(cropRect?: PhotoCropRect | null) {
+export const PHOTO_LAYER_BASE_W = 150;
+export const PHOTO_LAYER_BASE_H = 190;
+const BASE_W = PHOTO_LAYER_BASE_W;
+const BASE_H = PHOTO_LAYER_BASE_H;
+
+function mediaOffsetForCrop(cropRect?: PhotoCropRect | null) {
   const crop = normalizeCropRect(cropRect);
-  if (isFullCrop(crop)) {
-    return styles.mediaFill;
-  }
   return {
-    position: 'absolute' as const,
-    width: `${(1 / crop.width) * 100}%` as unknown as number,
-    height: `${(1 / crop.height) * 100}%` as unknown as number,
-    left: `${(-crop.x / crop.width) * 100}%` as unknown as number,
-    top: `${(-crop.y / crop.height) * 100}%` as unknown as number,
+    width: BASE_W,
+    height: BASE_H,
+    left: -crop.x * BASE_W,
+    top: -crop.y * BASE_H,
   };
 }
 
-const BASE_W = 150;
-const BASE_H = 190;
+function frameSizeForCrop(cropRect?: PhotoCropRect | null) {
+  const crop = normalizeCropRect(cropRect);
+  return {
+    width: Math.max(24, BASE_W * crop.width),
+    height: Math.max(24, BASE_H * crop.height),
+  };
+}
 
 export function DraggablePhoto({
   layer,
@@ -196,7 +202,8 @@ export function DraggablePhoto({
     }),
   ).current;
 
-  const cropped = !isFullCrop(layer.cropRect);
+  const frameSize = frameSizeForCrop(layer.cropRect);
+  const mediaOffset = mediaOffsetForCrop(layer.cropRect);
 
   return (
     <View
@@ -204,12 +211,12 @@ export function DraggablePhoto({
       style={[
         styles.hit,
         {
-          width: BASE_W,
-          height: BASE_H,
+          width: frameSize.width,
+          height: frameSize.height,
           left: `${layer.x * 100}%` as unknown as number,
           top: `${layer.y * 100}%` as unknown as number,
-          marginLeft: -BASE_W / 2,
-          marginTop: -BASE_H / 2,
+          marginLeft: -frameSize.width / 2,
+          marginTop: -frameSize.height / 2,
           transform: [{ scale: layer.scale }, { rotate: `${layer.rotation}deg` }],
           zIndex: selected ? 20 : 5,
         },
@@ -219,8 +226,8 @@ export function DraggablePhoto({
         <View style={styles.mediaClip}>
           <Image
             source={{ uri }}
-            style={mediaStyleForCrop(layer.cropRect)}
-            resizeMode={cropped ? 'stretch' : 'cover'}
+            style={[styles.mediaBase, mediaOffset]}
+            resizeMode="cover"
           />
         </View>
       </View>
@@ -252,7 +259,7 @@ const styles = StyleSheet.create({
     ...StyleSheet.absoluteFillObject,
     overflow: 'hidden',
   },
-  mediaFill: {
-    ...StyleSheet.absoluteFillObject,
+  mediaBase: {
+    position: 'absolute',
   },
 });

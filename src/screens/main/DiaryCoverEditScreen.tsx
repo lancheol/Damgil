@@ -1,7 +1,12 @@
+import { Ionicons } from '@expo/vector-icons';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
-import { useCallback, useMemo, useState } from 'react';
+import { useCallback, useMemo, useRef, useState } from 'react';
 import {
   Alert,
+  KeyboardAvoidingView,
+  Linking,
+  Modal,
+  Platform,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -9,13 +14,33 @@ import {
   TextInput,
   View,
 } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import * as ImagePicker from 'expo-image-picker';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { BackButton } from '../../components/common/BackButton';
 import { CoverCanvas } from '../../components/diary/CoverCanvas';
+import { PhotoCropModal } from '../../components/diary/PhotoCropModal';
+import { HomeBookShell } from '../../components/home/HomeBookShell';
 import { useDiaries } from '../../context/DiaryContext';
 import { RootStackParamList } from '../../navigation/types';
-import { CoverFontId, DiaryCover } from '../../types/diary';
+import {
+  CoverFontId,
+  DecorFontId,
+  DecorPhotoLayer,
+  DecorSticker,
+  DecorTextLayer,
+  DiaryCover,
+  DiaryPhoto,
+} from '../../types/diary';
+import {
+  createStickerId,
+  DECOR_FONTS,
+  DECOR_STICKER_EMOJIS,
+  DECOR_TEXT_COLORS,
+  DEFAULT_DECOR_TEXT_COLOR,
+} from '../../utils/decorAssets';
+import { createDefaultPhotoLayer } from '../../utils/diaryPageDecoration';
+import { createTextLayer } from '../../utils/diaryTextLayers';
 import {
   COVER_COLORS,
   COVER_FONTS,
@@ -27,10 +52,18 @@ import {
 import { colors, radii, spacing, typography } from '../../theme';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'DiaryCoverEdit'>;
+type ToolSheet = 'none' | 'sticker' | 'text' | 'cover';
+
+type HitRect = { x: number; y: number; width: number; height: number };
+
+function getFontInputStyle(fontId: DecorFontId) {
+  return DECOR_FONTS.find((font) => font.id === fontId)?.style;
+}
 
 export function DiaryCoverEditScreen({ navigation, route }: Props) {
   const { diaryId, fromTripEnd } = route.params;
-  const { getDiaryById, saveDiaryCover, discardCoverDraft } = useDiaries();
+  const insets = useSafeAreaInsets();
+  const { getDiaryById, saveDiaryCover, discardCoverDraft, addPhotoToDiary } = useDiaries();
   const diary = getDiaryById(diaryId);
 
   const initial = useMemo(() => {
@@ -45,39 +78,89 @@ export function DiaryCoverEditScreen({ navigation, route }: Props) {
   const [backgroundColor, setBackgroundColor] = useState(
     getCoverBackgroundColor(initial) || DEFAULT_COVER_COLOR,
   );
+  const [photos, setPhotos] = useState<DecorPhotoLayer[]>(
+    Array.isArray(initial.photos) ? initial.photos : [],
+  );
+  const [stickers, setStickers] = useState<DecorSticker[]>(
+    Array.isArray(initial.stickers) ? initial.stickers : [],
+  );
+  const [texts, setTexts] = useState<DecorTextLayer[]>(
+    Array.isArray(initial.texts) ? initial.texts : [],
+  );
+  const [selectedPhotoId, setSelectedPhotoId] = useState<string | null>(null);
+  const [selectedStickerId, setSelectedStickerId] = useState<string | null>(null);
+  const [selectedTextId, setSelectedTextId] = useState<string | null>(null);
+  const [draggingLayer, setDraggingLayer] = useState(false);
+  const [trashHot, setTrashHot] = useState(false);
   const [dirty, setDirty] = useState(false);
+  const [sheet, setSheet] = useState<ToolSheet>('none');
+  const [cropOpen, setCropOpen] = useState(false);
 
-  const markDirty = useCallback(() => setDirty(true), []);
+  const [draftText, setDraftText] = useState('');
+  const [draftFontId, setDraftFontId] = useState<DecorFontId>('sans');
+  const [draftColor, setDraftColor] = useState<string>(DEFAULT_DECOR_TEXT_COLOR);
+  const [editingTextId, setEditingTextId] = useState<string | null>(null);
+
+  const trashHotRef = useRef(false);
+  const deleteHitRef = useRef<HitRect>({ x: 0, y: 0, width: 0, height: 0 });
+  const deleteChipRef = useRef<View>(null);
+  const dirtyRef = useRef(dirty);
+  dirtyRef.current = dirty;
+
+  const photoById = useMemo(() => {
+    const map: Record<string, DiaryPhoto | undefined> = {};
+    for (const photo of diary?.photos ?? []) {
+      map[photo.id] = photo;
+    }
+    return map;
+  }, [diary]);
+
+  const markDirty = useCallback(() => {
+    dirtyRef.current = true;
+    setDirty(true);
+  }, []);
 
   const buildCover = useCallback((): DiaryCover => {
     return {
-      coverPhotoId: null,
+      coverPhotoId: photos[0]?.photoId ?? null,
       title: title.trim() || diary?.name || '나의 여행',
       fontId,
-      stickers: [],
+      stickers,
+      photos,
+      texts,
       backgroundColor,
       updatedAt: new Date().toISOString(),
     };
-  }, [title, fontId, backgroundColor, diary?.name]);
+  }, [title, fontId, stickers, photos, texts, backgroundColor, diary?.name]);
 
   const leaveToMyPage = () => {
     navigation.navigate('Main', { screen: 'MyPage' });
   };
 
+  const persistCover = useCallback(
+    (mode: 'save' | 'draft') => {
+      if (!diary) {
+        return false;
+      }
+      const ok = saveDiaryCover({
+        diaryId,
+        cover: buildCover(),
+        mode,
+      });
+      if (ok) {
+        dirtyRef.current = false;
+        setDirty(false);
+      }
+      return ok;
+    },
+    [diary, diaryId, buildCover, saveDiaryCover],
+  );
+
   const handleNext = () => {
-    if (!diary) {
-      return;
-    }
-    const ok = saveDiaryCover({
-      diaryId,
-      cover: buildCover(),
-      mode: 'save',
-    });
-    if (!ok) {
+    if (!persistCover('save')) {
       Alert.alert('저장 실패', '표지를 저장하지 못했습니다.');
       return;
     }
-    setDirty(false);
     if (fromTripEnd) {
       navigation.replace('DiaryEdit', { diaryId });
       return;
@@ -86,6 +169,10 @@ export function DiaryCoverEditScreen({ navigation, route }: Props) {
   };
 
   const handleLeave = () => {
+    if (!dirtyRef.current) {
+      leaveToMyPage();
+      return;
+    }
     Alert.alert(
       '임시 저장',
       '표지 편집을 임시 저장할까요?\n임시 저장한 다이어리는 비공개로 마이페이지에 등록됩니다.',
@@ -96,6 +183,7 @@ export function DiaryCoverEditScreen({ navigation, route }: Props) {
           style: 'destructive',
           onPress: () => {
             discardCoverDraft(diaryId);
+            dirtyRef.current = false;
             setDirty(false);
             leaveToMyPage();
           },
@@ -103,16 +191,10 @@ export function DiaryCoverEditScreen({ navigation, route }: Props) {
         {
           text: '임시 저장',
           onPress: () => {
-            const ok = saveDiaryCover({
-              diaryId,
-              cover: buildCover(),
-              mode: 'draft',
-            });
-            if (!ok) {
+            if (!persistCover('draft')) {
               Alert.alert('저장 실패', '임시 저장하지 못했어요.');
               return;
             }
-            setDirty(false);
             leaveToMyPage();
           },
         },
@@ -120,10 +202,227 @@ export function DiaryCoverEditScreen({ navigation, route }: Props) {
     );
   };
 
+  const measureDeleteChip = useCallback(() => {
+    deleteChipRef.current?.measureInWindow((x, y, width, height) => {
+      if (width > 0 && height > 0) {
+        deleteHitRef.current = { x, y, width, height };
+      }
+    });
+  }, []);
+
+  const shouldDeleteAtPoint = (pageX: number, pageY: number) => {
+    const hit = deleteHitRef.current;
+    return (
+      pageX >= hit.x &&
+      pageX <= hit.x + hit.width &&
+      pageY >= hit.y &&
+      pageY <= hit.y + hit.height
+    );
+  };
+
+  const setTrashHotState = (hot: boolean) => {
+    trashHotRef.current = hot;
+    setTrashHot(hot);
+  };
+
+  const clearSelection = () => {
+    setSelectedPhotoId(null);
+    setSelectedStickerId(null);
+    setSelectedTextId(null);
+  };
+
+  const selectedPhotoLayer = photos.find((item) => item.id === selectedPhotoId) ?? null;
+
+  const addPhotoLayer = (photoId: string) => {
+    const offset = photos.length * 0.04;
+    const layer = createDefaultPhotoLayer(photoId, {
+      x: Math.min(0.7, 0.5 + offset),
+      y: Math.min(0.7, 0.4 + offset),
+      scale: 0.68,
+    });
+    setPhotos((prev) => [...prev, layer]);
+    setSelectedPhotoId(layer.id);
+    setSelectedStickerId(null);
+    setSelectedTextId(null);
+    markDirty();
+  };
+
+  const pickPhotoFromLibrary = async () => {
+    if (!diary) {
+      return;
+    }
+
+    const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
+    if (!permission.granted) {
+      Alert.alert(
+        '사진 권한 필요',
+        '갤러리에서 사진을 가져오려면 사진 접근을 허용해 주세요.',
+        [
+          { text: '취소', style: 'cancel' },
+          {
+            text: '설정 열기',
+            onPress: () => {
+              void Linking.openSettings();
+            },
+          },
+        ],
+      );
+      return;
+    }
+
+    const result = await ImagePicker.launchImageLibraryAsync({
+      mediaTypes: ['images'],
+      allowsMultipleSelection: false,
+      quality: 0.9,
+    });
+
+    if (result.canceled || !result.assets?.[0]?.uri) {
+      return;
+    }
+
+    const asset = result.assets[0];
+    const saved = addPhotoToDiary({
+      diaryId,
+      uri: asset.uri,
+      mediaType: 'photo',
+      placeName: diary.place || null,
+      latitude: 0,
+      longitude: 0,
+      allowAfterEnd: true,
+    });
+
+    if (!saved) {
+      return;
+    }
+
+    addPhotoLayer(saved.id);
+  };
+
+  const openTextTool = () => {
+    clearSelection();
+    setEditingTextId(null);
+    setDraftText('');
+    setDraftFontId('sans');
+    setDraftColor(DEFAULT_DECOR_TEXT_COLOR);
+    setSheet('text');
+  };
+
+  const openEditText = (id: string) => {
+    const target = texts.find((item) => item.id === id);
+    if (!target) {
+      return;
+    }
+    setSelectedPhotoId(null);
+    setSelectedStickerId(null);
+    setSelectedTextId(id);
+    setEditingTextId(id);
+    setDraftText(target.content);
+    setDraftFontId(target.fontId);
+    setDraftColor(target.color ?? DEFAULT_DECOR_TEXT_COLOR);
+    setSheet('text');
+  };
+
+  const commitTextDraft = () => {
+    const content = draftText.trim();
+    if (!content) {
+      if (editingTextId) {
+        setTexts((prev) => prev.filter((item) => item.id !== editingTextId));
+        setSelectedTextId(null);
+        markDirty();
+      }
+      setEditingTextId(null);
+      setSheet('none');
+      return;
+    }
+    if (editingTextId) {
+      setTexts((prev) =>
+        prev.map((item) =>
+          item.id === editingTextId
+            ? { ...item, content, fontId: draftFontId, color: draftColor }
+            : item,
+        ),
+      );
+      setSelectedTextId(editingTextId);
+    } else {
+      const layer = createTextLayer(content, draftFontId, {
+        x: 0.5,
+        y: 0.7,
+        color: draftColor,
+      });
+      setTexts((prev) => [...prev, layer]);
+      setSelectedTextId(layer.id);
+    }
+    setEditingTextId(null);
+    setSheet('none');
+    markDirty();
+  };
+
+  const addSticker = (emoji: string) => {
+    const sticker: DecorSticker = {
+      id: createStickerId('cover'),
+      emoji,
+      x: 0.22,
+      y: 0.28,
+      scale: 1,
+      rotation: 0,
+    };
+    setStickers((prev) => [...prev, sticker]);
+    setSelectedStickerId(sticker.id);
+    setSelectedPhotoId(null);
+    setSelectedTextId(null);
+    setSheet('none');
+    markDirty();
+  };
+
+  const finishDelete = (
+    type: 'photo' | 'sticker' | 'text',
+    id: string,
+    shouldDelete: boolean,
+  ) => {
+    if (shouldDelete) {
+      if (type === 'photo') {
+        setPhotos((prev) => prev.filter((item) => item.id !== id));
+        setSelectedPhotoId(null);
+      } else if (type === 'sticker') {
+        setStickers((prev) => prev.filter((item) => item.id !== id));
+        setSelectedStickerId(null);
+      } else {
+        setTexts((prev) => prev.filter((item) => item.id !== id));
+        setSelectedTextId(null);
+      }
+      markDirty();
+    }
+    setTrashHotState(false);
+    setDraggingLayer(false);
+  };
+
+  const handleDragEnd = (
+    type: 'photo' | 'sticker' | 'text',
+    id: string,
+    pageX?: number,
+    pageY?: number,
+  ) => {
+    if (typeof pageX !== 'number' || typeof pageY !== 'number') {
+      finishDelete(type, id, trashHotRef.current);
+      return;
+    }
+    const node = deleteChipRef.current;
+    if (!node) {
+      finishDelete(type, id, shouldDeleteAtPoint(pageX, pageY));
+      return;
+    }
+    node.measureInWindow((x, y, width, height) => {
+      if (width > 0 && height > 0) {
+        deleteHitRef.current = { x, y, width, height };
+      }
+      finishDelete(type, id, shouldDeleteAtPoint(pageX, pageY));
+    });
+  };
+
   if (!diary) {
     return (
       <SafeAreaView style={styles.safe} edges={['top', 'bottom']}>
-        <View style={styles.header}>
+        <View style={styles.topBar}>
           <BackButton onPress={() => navigation.goBack()} />
         </View>
         <View style={styles.centered}>
@@ -133,14 +432,13 @@ export function DiaryCoverEditScreen({ navigation, route }: Props) {
     );
   }
 
+  const showTrash = draggingLayer && sheet === 'none';
+
   return (
-    <SafeAreaView style={styles.safe} edges={['top', 'bottom']}>
-      <View style={styles.header}>
+    <SafeAreaView style={styles.safe} edges={['top']}>
+      <View style={styles.topBar}>
         <BackButton onPress={handleLeave} />
-        <View style={styles.headerCopy}>
-          <Text style={styles.headerTitle}>표지 편집</Text>
-          <Text style={styles.headerSubtitle}>여행 다이어리 표지를 꾸며 보세요</Text>
-        </View>
+        <Text style={styles.screenTitle}>표지 편집</Text>
         <Pressable
           accessibilityRole="button"
           onPress={handleNext}
@@ -150,21 +448,229 @@ export function DiaryCoverEditScreen({ navigation, route }: Props) {
         </Pressable>
       </View>
 
-      <ScrollView
-        contentContainerStyle={styles.content}
-        keyboardShouldPersistTaps="handled"
-        showsVerticalScrollIndicator={false}
-      >
-        <CoverCanvas
-          backgroundColor={backgroundColor}
-          title={title.trim() || diary.name}
-          fontId={fontId}
-          stickers={[]}
-          selectedStickerId={null}
-        />
+      <View style={styles.body}>
+        <View style={styles.bookStack}>
+          <HomeBookShell
+            style={styles.bookShell}
+            contentStyle={styles.bookContent}
+            spineWidth={18}
+            spineOffsetX={-8}
+            hideSpineRidges
+            hidePageEdge
+          >
+            <View style={styles.coverWrap}>
+              <CoverCanvas
+                fill
+                style={styles.coverCanvas}
+                backgroundColor={backgroundColor}
+                title={title.trim() || diary.name}
+                fontId={fontId}
+                photos={photos}
+                photoById={photoById}
+                stickers={stickers}
+                texts={texts}
+                selectedPhotoId={selectedPhotoId}
+                selectedStickerId={selectedStickerId}
+                selectedTextId={selectedTextId}
+                onBackgroundPress={clearSelection}
+                onSelectPhoto={(id) => {
+                  setSelectedPhotoId(id);
+                  setSelectedStickerId(null);
+                  setSelectedTextId(null);
+                }}
+                onSelectSticker={(id) => {
+                  setSelectedStickerId(id);
+                  setSelectedPhotoId(null);
+                  setSelectedTextId(null);
+                }}
+                onSelectText={(id) => {
+                  setSelectedTextId(id);
+                  setSelectedPhotoId(null);
+                  setSelectedStickerId(null);
+                }}
+                onEditText={openEditText}
+                onMovePhoto={(id, x, y) => {
+                  setPhotos((prev) => prev.map((item) => (item.id === id ? { ...item, x, y } : item)));
+                  markDirty();
+                }}
+                onScalePhoto={(id, scale) => {
+                  setPhotos((prev) =>
+                    prev.map((item) => (item.id === id ? { ...item, scale } : item)),
+                  );
+                  markDirty();
+                }}
+                onRotatePhoto={(id, rotation) => {
+                  setPhotos((prev) =>
+                    prev.map((item) => (item.id === id ? { ...item, rotation } : item)),
+                  );
+                  markDirty();
+                }}
+                onMoveSticker={(id, x, y) => {
+                  setStickers((prev) =>
+                    prev.map((item) => (item.id === id ? { ...item, x, y } : item)),
+                  );
+                  markDirty();
+                }}
+                onScaleSticker={(id, scale) => {
+                  setStickers((prev) =>
+                    prev.map((item) => (item.id === id ? { ...item, scale } : item)),
+                  );
+                  markDirty();
+                }}
+                onRotateSticker={(id, rotation) => {
+                  setStickers((prev) =>
+                    prev.map((item) => (item.id === id ? { ...item, rotation } : item)),
+                  );
+                  markDirty();
+                }}
+                onMoveText={(id, x, y) => {
+                  setTexts((prev) => prev.map((item) => (item.id === id ? { ...item, x, y } : item)));
+                  markDirty();
+                }}
+                onScaleText={(id, scale) => {
+                  setTexts((prev) =>
+                    prev.map((item) => (item.id === id ? { ...item, scale } : item)),
+                  );
+                  markDirty();
+                }}
+                onRotateText={(id, rotation) => {
+                  setTexts((prev) =>
+                    prev.map((item) => (item.id === id ? { ...item, rotation } : item)),
+                  );
+                  markDirty();
+                }}
+                onLayerDragChange={(dragging) => {
+                  setDraggingLayer(dragging);
+                  if (dragging) {
+                    measureDeleteChip();
+                  } else {
+                    setTrashHotState(false);
+                  }
+                }}
+                onLayerDragPointer={(pageX, pageY) => {
+                  setTrashHotState(shouldDeleteAtPoint(pageX, pageY));
+                }}
+                onPhotoDragEnd={(id, pageX, pageY) => handleDragEnd('photo', id, pageX, pageY)}
+                onStickerDragEnd={(id, pageX, pageY) => handleDragEnd('sticker', id, pageX, pageY)}
+                onTextDragEnd={(id, pageX, pageY) => handleDragEnd('text', id, pageX, pageY)}
+              />
 
-        <View style={styles.block}>
-          <Text style={styles.blockLabel}>제목</Text>
+              {showTrash ? (
+                <View
+                  ref={deleteChipRef}
+                  onLayout={measureDeleteChip}
+                  style={[styles.trashChip, trashHot && styles.trashChipHot]}
+                  pointerEvents="none"
+                >
+                  <Ionicons name="trash-outline" size={22} color={colors.white} />
+                </View>
+              ) : null}
+            </View>
+          </HomeBookShell>
+        </View>
+      </View>
+
+      <View style={[styles.toolDock, { paddingBottom: Math.max(insets.bottom, 12) }]}>
+        <View style={styles.toolRow}>
+          <Pressable
+            onPress={() => {
+              void pickPhotoFromLibrary();
+            }}
+            style={({ pressed }) => [styles.toolItem, pressed && styles.pressed]}
+          >
+            <Ionicons name="image-outline" size={24} color={colors.ink} />
+            <Text style={styles.toolLabel}>사진</Text>
+          </Pressable>
+          <Pressable
+            disabled={!selectedPhotoLayer}
+            onPress={() => setCropOpen(true)}
+            style={({ pressed }) => [styles.toolItem, pressed && styles.pressed]}
+          >
+            <Ionicons
+              name="crop-outline"
+              size={24}
+              color={selectedPhotoLayer ? colors.ink : colors.inkMuted}
+            />
+            <Text style={[styles.toolLabel, !selectedPhotoLayer && styles.toolLabelDisabled]}>
+              자르기
+            </Text>
+          </Pressable>
+          <Pressable
+            onPress={openTextTool}
+            style={({ pressed }) => [styles.toolItem, pressed && styles.pressed]}
+          >
+            <Text style={styles.toolAa}>Aa</Text>
+            <Text style={styles.toolLabel}>텍스트</Text>
+          </Pressable>
+          <Pressable
+            onPress={() => setSheet('sticker')}
+            style={({ pressed }) => [styles.toolItem, pressed && styles.pressed]}
+          >
+            <Ionicons name="happy-outline" size={24} color={colors.ink} />
+            <Text style={styles.toolLabel}>스티커</Text>
+          </Pressable>
+          <Pressable
+            onPress={() => setSheet('cover')}
+            style={({ pressed }) => [styles.toolItem, pressed && styles.pressed]}
+          >
+            <Ionicons name="color-palette-outline" size={24} color={colors.ink} />
+            <Text style={styles.toolLabel}>표지</Text>
+          </Pressable>
+        </View>
+      </View>
+
+      {selectedPhotoLayer ? (
+        <PhotoCropModal
+          visible={cropOpen}
+          uri={photoById[selectedPhotoLayer.photoId]?.uri ?? ''}
+          initialCrop={selectedPhotoLayer.cropRect}
+          onCancel={() => setCropOpen(false)}
+          onConfirm={(next) => {
+            setPhotos((prev) =>
+              prev.map((item) =>
+                item.id === selectedPhotoLayer.id ? { ...item, cropRect: next } : item,
+              ),
+            );
+            setCropOpen(false);
+            markDirty();
+          }}
+        />
+      ) : null}
+
+      <Modal
+        visible={sheet === 'sticker'}
+        transparent
+        animationType="slide"
+        onRequestClose={() => setSheet('none')}
+      >
+        <Pressable style={styles.sheetBackdropClear} onPress={() => setSheet('none')} />
+        <View style={[styles.sheet, { paddingBottom: Math.max(insets.bottom, 16) }]}>
+          <View style={styles.sheetHandle} />
+          <Text style={styles.sheetTitle}>스티커</Text>
+          <ScrollView contentContainerStyle={styles.stickerGrid}>
+            {DECOR_STICKER_EMOJIS.map((emoji) => (
+              <Pressable
+                key={emoji}
+                onPress={() => addSticker(emoji)}
+                style={({ pressed }) => [styles.stickerCell, pressed && styles.pressed]}
+              >
+                <Text style={styles.stickerCellText}>{emoji}</Text>
+              </Pressable>
+            ))}
+          </ScrollView>
+        </View>
+      </Modal>
+
+      <Modal
+        visible={sheet === 'cover'}
+        transparent
+        animationType="slide"
+        onRequestClose={() => setSheet('none')}
+      >
+        <Pressable style={styles.sheetBackdropClear} onPress={() => setSheet('none')} />
+        <View style={[styles.sheet, { paddingBottom: Math.max(insets.bottom, 16) }]}>
+          <View style={styles.sheetHandle} />
+          <Text style={styles.sheetTitle}>표지</Text>
           <TextInput
             value={title}
             onChangeText={(text) => {
@@ -173,13 +679,13 @@ export function DiaryCoverEditScreen({ navigation, route }: Props) {
             }}
             placeholder="다이어리 제목"
             placeholderTextColor={colors.placeholder}
-            style={styles.titleInput}
+            style={styles.coverTitleInput}
           />
-        </View>
-
-        <View style={styles.block}>
-          <Text style={styles.blockLabel}>글꼴</Text>
-          <View style={styles.fontRow}>
+          <ScrollView
+            horizontal
+            showsHorizontalScrollIndicator={false}
+            contentContainerStyle={styles.coverFontRow}
+          >
             {COVER_FONTS.map((font) => {
               const active = font.id === fontId;
               return (
@@ -189,20 +695,26 @@ export function DiaryCoverEditScreen({ navigation, route }: Props) {
                     setFontId(font.id);
                     markDirty();
                   }}
-                  style={[styles.fontChip, active && styles.fontChipActive]}
+                  style={[styles.coverFontChip, active && styles.coverFontChipActive]}
                 >
-                  <Text style={[styles.fontChipText, font.style, active && styles.fontChipTextActive]}>
+                  <Text
+                    style={[
+                      styles.coverFontChipText,
+                      font.style,
+                      active && styles.coverFontChipTextActive,
+                    ]}
+                  >
                     {font.label}
                   </Text>
                 </Pressable>
               );
             })}
-          </View>
-        </View>
-
-        <View style={styles.block}>
-          <Text style={styles.blockLabel}>표지 색상</Text>
-          <View style={styles.colorRow}>
+          </ScrollView>
+          <ScrollView
+            horizontal
+            showsHorizontalScrollIndicator={false}
+            contentContainerStyle={styles.coverColorRow}
+          >
             {COVER_COLORS.map((swatch) => {
               const active = backgroundColor === swatch;
               return (
@@ -213,10 +725,10 @@ export function DiaryCoverEditScreen({ navigation, route }: Props) {
                     markDirty();
                   }}
                   style={[
-                    styles.colorSwatch,
+                    styles.coverColorSwatch,
                     { backgroundColor: swatch },
-                    active && styles.colorSwatchActive,
-                    swatch === '#F5F5F5' && styles.colorSwatchBorder,
+                    active && styles.coverColorSwatchActive,
+                    swatch === '#F5F5F5' && styles.coverColorSwatchBorder,
                   ]}
                   accessibilityRole="button"
                   accessibilityState={{ selected: active }}
@@ -224,130 +736,299 @@ export function DiaryCoverEditScreen({ navigation, route }: Props) {
                 />
               );
             })}
-          </View>
+          </ScrollView>
         </View>
-      </ScrollView>
+      </Modal>
+
+      <Modal
+        visible={sheet === 'text'}
+        transparent
+        animationType="fade"
+        onRequestClose={() => {
+          setSheet('none');
+          setEditingTextId(null);
+        }}
+      >
+        <KeyboardAvoidingView
+          style={styles.textModalRoot}
+          behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+        >
+          <Pressable style={styles.textModalDim} onPress={commitTextDraft} />
+          <View style={styles.textComposer}>
+            <View style={styles.textField}>
+              <Text
+                pointerEvents="none"
+                style={[
+                  styles.textInput,
+                  styles.textPreview,
+                  getFontInputStyle(draftFontId),
+                  { color: draftColor },
+                ]}
+              >
+                {draftText}
+              </Text>
+              <TextInput
+                value={draftText}
+                onChangeText={setDraftText}
+                style={[styles.textInput, styles.textInputHit, { color: 'transparent' }]}
+                selectionColor={draftColor}
+                cursorColor={draftColor}
+                multiline
+                autoFocus
+                maxLength={80}
+              />
+            </View>
+          </View>
+          <SafeAreaView edges={['bottom']} style={styles.fontBarWrap}>
+            <ScrollView
+              horizontal
+              showsHorizontalScrollIndicator={false}
+              contentContainerStyle={styles.colorBar}
+            >
+              {DECOR_TEXT_COLORS.map((swatch) => (
+                <Pressable key={swatch} onPress={() => setDraftColor(swatch)} style={styles.colorDotHit}>
+                  <View
+                    style={[
+                      styles.colorDot,
+                      { backgroundColor: swatch },
+                      swatch === '#FFFFFF' && styles.colorDotLight,
+                      swatch === draftColor && styles.colorDotActive,
+                    ]}
+                  />
+                </Pressable>
+              ))}
+            </ScrollView>
+            <ScrollView
+              horizontal
+              showsHorizontalScrollIndicator={false}
+              contentContainerStyle={styles.fontBar}
+            >
+              {DECOR_FONTS.map((font) => {
+                const active = font.id === draftFontId;
+                return (
+                  <Pressable
+                    key={font.id}
+                    onPress={() => setDraftFontId(font.id)}
+                    style={[styles.fontChip, active && styles.fontChipActive]}
+                  >
+                    <Text style={[styles.fontChipText, font.style, active && styles.fontChipTextActive]}>
+                      {font.label}
+                    </Text>
+                  </Pressable>
+                );
+              })}
+            </ScrollView>
+          </SafeAreaView>
+        </KeyboardAvoidingView>
+      </Modal>
     </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
-  safe: {
-    flex: 1,
-    backgroundColor: colors.background,
-  },
-  header: {
+  safe: { flex: 1, backgroundColor: colors.background },
+  topBar: {
     flexDirection: 'row',
     alignItems: 'center',
     paddingHorizontal: spacing.lg,
     paddingTop: spacing.sm,
-    paddingBottom: spacing.md,
+    paddingBottom: spacing.sm,
     gap: spacing.sm,
   },
-  headerCopy: {
-    flex: 1,
-    gap: 2,
-  },
-  headerTitle: {
+  screenTitle: {
     ...typography.brandTitle,
-    fontSize: 20,
+    flex: 1,
+    fontSize: 18,
     color: colors.ink,
   },
-  headerSubtitle: {
-    ...typography.body,
-    fontSize: 13,
-    color: colors.inkMuted,
-  },
   nextChip: {
-    minHeight: 36,
+    minHeight: 34,
     paddingHorizontal: spacing.md,
     borderRadius: radii.pill,
     backgroundColor: colors.black,
     alignItems: 'center',
     justifyContent: 'center',
   },
-  nextChipText: {
-    ...typography.label,
-    color: colors.white,
+  nextChipText: { ...typography.label, color: colors.white },
+  body: {
+    flex: 1,
+    paddingTop: spacing.xs,
+    overflow: 'visible',
   },
-  content: {
-    paddingHorizontal: spacing.xl,
-    paddingBottom: spacing.xxl,
-    gap: spacing.xl,
+  bookStack: {
+    flex: 1,
+    overflow: 'visible',
   },
-  block: {
-    gap: spacing.sm,
+  bookShell: {
+    flex: 1,
+    borderRadius: 0,
+    borderTopLeftRadius: 15,
+    borderBottomLeftRadius: 15,
+    borderTopRightRadius: 28,
+    borderBottomRightRadius: 28,
   },
-  blockLabel: {
-    ...typography.label,
-    color: colors.ink,
+  bookContent: {
+    paddingTop: 9,
+    paddingBottom: 9,
+    paddingLeft: 4,
+    paddingRight: 8,
   },
-  titleInput: {
-    minHeight: 48,
-    borderRadius: radii.md,
+  coverWrap: {
+    flex: 1,
+    position: 'relative',
+  },
+  coverCanvas: {
+    borderRadius: 0,
+    borderTopLeftRadius: 2,
+    borderBottomLeftRadius: 2,
+    borderTopRightRadius: 22,
+    borderBottomRightRadius: 22,
+  },
+  trashChip: {
+    position: 'absolute',
+    alignSelf: 'center',
+    bottom: 48,
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: 'rgba(0,0,0,0.55)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    zIndex: 6,
+  },
+  trashChipHot: {
+    backgroundColor: 'rgba(214,69,69,0.9)',
+    transform: [{ scale: 1.08 }],
+  },
+  toolDock: {
+    marginTop: 25,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: colors.border,
     backgroundColor: colors.white,
+    paddingTop: spacing.xs,
     paddingHorizontal: spacing.lg,
-    color: colors.ink,
-    fontSize: 16,
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: colors.border,
   },
-  fontRow: {
+  toolRow: { flexDirection: 'row', justifyContent: 'space-around' },
+  toolItem: { alignItems: 'center', gap: 4, minWidth: 56, paddingVertical: spacing.sm },
+  toolAa: { fontSize: 20, fontWeight: '700', color: colors.ink, lineHeight: 24 },
+  toolLabel: { fontSize: 11, color: colors.inkSoft },
+  toolLabelDisabled: { color: colors.inkMuted },
+  sheetBackdropClear: { flex: 1, backgroundColor: 'transparent' },
+  sheet: {
+    backgroundColor: colors.white,
+    borderTopLeftRadius: radii.lg,
+    borderTopRightRadius: radii.lg,
+    paddingHorizontal: spacing.lg,
+    paddingTop: spacing.sm,
+    maxHeight: '55%',
+    gap: spacing.md,
+  },
+  sheetHandle: {
+    alignSelf: 'center',
+    width: 36,
+    height: 4,
+    borderRadius: 2,
+    backgroundColor: '#D4D4D4',
+    marginBottom: spacing.sm,
+  },
+  sheetTitle: { ...typography.label, color: colors.ink },
+  stickerGrid: {
     flexDirection: 'row',
     flexWrap: 'wrap',
     gap: spacing.sm,
+    paddingBottom: spacing.lg,
   },
-  fontChip: {
-    minWidth: 64,
+  stickerCell: {
+    width: 52,
+    height: 52,
+    borderRadius: radii.sm,
+    backgroundColor: colors.background,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  stickerCellText: { fontSize: 28 },
+  coverTitleInput: {
     minHeight: 44,
+    borderRadius: radii.md,
+    backgroundColor: colors.background,
+    paddingHorizontal: spacing.lg,
+    color: colors.ink,
+    fontSize: 16,
+  },
+  coverFontRow: {
+    flexDirection: 'row',
+    gap: spacing.sm,
+    paddingVertical: 2,
+  },
+  coverFontChip: {
+    minWidth: 64,
+    minHeight: 40,
     paddingHorizontal: spacing.md,
     borderRadius: radii.md,
     borderWidth: 1,
     borderColor: colors.border,
-    backgroundColor: colors.white,
+    backgroundColor: colors.background,
     alignItems: 'center',
     justifyContent: 'center',
   },
-  fontChipActive: {
+  coverFontChipActive: {
     borderColor: colors.black,
     backgroundColor: colors.black,
   },
-  fontChipText: {
+  coverFontChipText: {
     fontSize: 15,
     color: colors.ink,
   },
-  fontChipTextActive: {
+  coverFontChipTextActive: {
     color: colors.white,
   },
-  colorRow: {
+  coverColorRow: {
     flexDirection: 'row',
-    flexWrap: 'wrap',
     gap: spacing.sm,
+    paddingBottom: spacing.xs,
   },
-  colorSwatch: {
-    width: 40,
-    height: 40,
+  coverColorSwatch: {
+    width: 36,
+    height: 36,
     borderRadius: radii.pill,
     borderWidth: 2,
     borderColor: 'transparent',
   },
-  colorSwatchBorder: {
+  coverColorSwatchBorder: {
     borderWidth: StyleSheet.hairlineWidth,
     borderColor: '#D1D5DB',
   },
-  colorSwatchActive: {
+  coverColorSwatchActive: {
     borderColor: colors.black,
   },
-  centered: {
-    flex: 1,
-    alignItems: 'center',
-    justifyContent: 'center',
+  textModalRoot: { flex: 1 },
+  textModalDim: { ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(0,0,0,0.72)' },
+  textComposer: { flex: 1, justifyContent: 'center', paddingHorizontal: spacing.xl },
+  textField: { minHeight: 120 },
+  textInput: { fontSize: 28, fontWeight: '600', textAlign: 'center' },
+  textPreview: { ...StyleSheet.absoluteFillObject },
+  textInputHit: { minHeight: 120 },
+  fontBarWrap: {
+    backgroundColor: 'rgba(0,0,0,0.35)',
+    paddingVertical: spacing.md,
+    gap: spacing.sm,
   },
-  emptyText: {
-    ...typography.body,
-    color: colors.inkMuted,
+  colorBar: { paddingHorizontal: spacing.lg, gap: spacing.sm },
+  colorDotHit: { padding: 4 },
+  colorDot: { width: 28, height: 28, borderRadius: 14 },
+  colorDotLight: { borderWidth: StyleSheet.hairlineWidth, borderColor: '#D4D4D4' },
+  colorDotActive: { borderWidth: 2, borderColor: colors.white },
+  fontBar: { paddingHorizontal: spacing.lg, gap: spacing.sm },
+  fontChip: {
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm,
+    borderRadius: radii.pill,
+    backgroundColor: 'rgba(255,255,255,0.12)',
   },
-  pressed: {
-    opacity: 0.88,
-  },
+  fontChipActive: { backgroundColor: colors.white },
+  fontChipText: { color: colors.white, fontSize: 13 },
+  fontChipTextActive: { color: colors.ink },
+  centered: { flex: 1, alignItems: 'center', justifyContent: 'center' },
+  emptyText: { ...typography.body, color: colors.inkMuted },
+  pressed: { opacity: 0.85 },
 });

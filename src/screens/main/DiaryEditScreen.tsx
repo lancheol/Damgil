@@ -49,6 +49,7 @@ import {
 } from '../../utils/diaryPlaces';
 import { createTextLayer } from '../../utils/diaryTextLayers';
 import { buildDiaryTimeline } from '../../utils/diaryTimeline';
+import { getCoverBackgroundColor, getEffectiveCover } from '../../utils/diaryCover';
 import { colors, radii, spacing, typography } from '../../theme';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'DiaryEdit'>;
@@ -81,6 +82,10 @@ export function DiaryEditScreen({ navigation, route }: Props) {
   }, [diary, diaryId, savePlaceSelections]);
 
   const timeline = useMemo(() => (diary ? buildDiaryTimeline(diary) : []), [diary]);
+  const coverColor = useMemo(
+    () => (diary ? getCoverBackgroundColor(getEffectiveCover(diary)) : undefined),
+    [diary],
+  );
   const photoById = useMemo(() => {
     const map: Record<string, DiaryPhoto | undefined> = {};
     for (const photo of diary?.photos ?? []) {
@@ -119,16 +124,6 @@ export function DiaryEditScreen({ navigation, route }: Props) {
     );
   }, [diary, activeDay]);
 
-  useEffect(() => {
-    if (!dayPlaces.length) {
-      setActivePlaceId(null);
-      return;
-    }
-    if (!dayPlaces.some((place) => place.id === activePlaceId)) {
-      setActivePlaceId(dayPlaces[0].id);
-    }
-  }, [dayPlaces, activePlaceId]);
-
   const activePlace = useMemo(
     () => dayPlaces.find((place) => place.id === activePlaceId) ?? dayPlaces[0] ?? null,
     [dayPlaces, activePlaceId],
@@ -155,19 +150,78 @@ export function DiaryEditScreen({ navigation, route }: Props) {
   const deleteHitRef = useRef<HitRect>({ x: 0, y: 0, width: 0, height: 0 });
   const deleteChipRef = useRef<View>(null);
   const loadedPlaceIdRef = useRef<string | null>(null);
+  const photosRef = useRef(photos);
+  const stickersRef = useRef(stickers);
+  const textsRef = useRef(texts);
+  const dirtyRef = useRef(dirty);
+  const activePlaceRef = useRef(activePlace);
+  photosRef.current = photos;
+  stickersRef.current = stickers;
+  textsRef.current = texts;
+  dirtyRef.current = dirty;
+  activePlaceRef.current = activePlace;
 
-  const markDirty = useCallback(() => setDirty(true), []);
+  const markDirty = useCallback(() => {
+    dirtyRef.current = true;
+    setDirty(true);
+  }, []);
 
   const persistCurrent = useCallback(() => {
-    if (!activePlace) {
+    const place = activePlaceRef.current;
+    if (!place) {
       return true;
     }
-    return savePlacePageDecoration({
+    const ok = savePlacePageDecoration({
       diaryId,
-      placeId: activePlace.id,
-      decoration: buildPlacePageDecoration({ photos, stickers, texts }),
+      placeId: place.id,
+      decoration: buildPlacePageDecoration({
+        photos: photosRef.current,
+        stickers: stickersRef.current,
+        texts: textsRef.current,
+      }),
     });
-  }, [activePlace, diaryId, photos, stickers, texts, savePlacePageDecoration]);
+    if (ok) {
+      dirtyRef.current = false;
+      setDirty(false);
+    }
+    return ok;
+  }, [diaryId, savePlacePageDecoration]);
+
+  const placesForDayKey = useCallback(
+    (dateKey: string) => {
+      if (!diary) {
+        return [] as DiaryPlaceSelection[];
+      }
+      const day = timeline.find((group) => group.dateKey === dateKey);
+      if (!day) {
+        return [] as DiaryPlaceSelection[];
+      }
+      const dayPhotoIds = new Set(day.records.map((item) => item.id));
+      return (diary.placeSelections ?? []).filter(
+        (place) =>
+          dayPhotoIds.has(place.representativePhotoId) ||
+          place.photoIds.some((id) => dayPhotoIds.has(id)),
+      );
+    },
+    [diary, timeline],
+  );
+
+  useEffect(() => {
+    if (!dayPlaces.length) {
+      if (dirtyRef.current) {
+        persistCurrent();
+      }
+      setActivePlaceId(null);
+      return;
+    }
+    if (!dayPlaces.some((place) => place.id === activePlaceId)) {
+      if (dirtyRef.current) {
+        persistCurrent();
+      }
+      loadedPlaceIdRef.current = null;
+      setActivePlaceId(dayPlaces[0].id);
+    }
+  }, [dayPlaces, activePlaceId, persistCurrent]);
 
   useEffect(() => {
     if (!activePlace) {
@@ -180,26 +234,27 @@ export function DiaryEditScreen({ navigation, route }: Props) {
     if (loadedPlaceIdRef.current === activePlace.id) {
       return;
     }
-    const next = normalizePlacePageDecoration(
-      activePlace.pageDecoration,
-      activePlace.representativePhotoId,
-    );
+    const saved =
+      diary?.placeSelections?.find((place) => place.id === activePlace.id)?.pageDecoration ??
+      activePlace.pageDecoration;
+    const next = normalizePlacePageDecoration(saved, activePlace.representativePhotoId);
     setPhotos(next.photos);
     setStickers(next.stickers);
     setTexts(next.texts);
     setSelectedPhotoId(next.photos[0]?.id ?? null);
     setSelectedStickerId(null);
     setSelectedTextId(null);
+    dirtyRef.current = false;
     setDirty(false);
     setSheet('none');
     loadedPlaceIdRef.current = activePlace.id;
-  }, [activePlace]);
+  }, [activePlace, diary?.placeSelections]);
 
   const selectPlace = (placeId: string) => {
     if (placeId === activePlaceId) {
       return;
     }
-    if (dirty) {
+    if (dirtyRef.current) {
       const ok = persistCurrent();
       if (!ok) {
         Alert.alert('저장 실패', '페이지를 저장하지 못했어요.');
@@ -208,6 +263,27 @@ export function DiaryEditScreen({ navigation, route }: Props) {
     }
     loadedPlaceIdRef.current = null;
     setActivePlaceId(placeId);
+  };
+
+  const selectDay = (dateKey: string) => {
+    if (dateKey === activeDayKey) {
+      return;
+    }
+    if (dirtyRef.current) {
+      const ok = persistCurrent();
+      if (!ok) {
+        Alert.alert('저장 실패', '페이지를 저장하지 못했어요.');
+        return;
+      }
+    }
+
+    const nextPlaces = placesForDayKey(dateKey);
+    const currentId = activePlaceRef.current?.id ?? activePlaceId;
+    if (nextPlaces.length > 0 && !nextPlaces.some((place) => place.id === currentId)) {
+      loadedPlaceIdRef.current = null;
+      setActivePlaceId(nextPlaces[0].id);
+    }
+    setActiveDayKey(dateKey);
   };
 
   const measureDeleteChip = useCallback(() => {
@@ -429,7 +505,7 @@ export function DiaryEditScreen({ navigation, route }: Props) {
   };
 
   const handleDone = () => {
-    if (dirty && !persistCurrent()) {
+    if (dirtyRef.current && !persistCurrent()) {
       Alert.alert('저장 실패', '페이지를 저장하지 못했어요.');
       return;
     }
@@ -437,7 +513,7 @@ export function DiaryEditScreen({ navigation, route }: Props) {
   };
 
   const handleBack = () => {
-    if (!dirty) {
+    if (!dirtyRef.current) {
       navigation.goBack();
       return;
     }
@@ -495,7 +571,7 @@ export function DiaryEditScreen({ navigation, route }: Props) {
               return (
                 <Pressable
                   key={group.dateKey}
-                  onPress={() => setActiveDayKey(group.dateKey)}
+                  onPress={() => selectDay(group.dateKey)}
                   style={[styles.indexTab, selected && styles.indexTabActive]}
                   accessibilityRole="button"
                   accessibilityState={{ selected }}
@@ -509,9 +585,18 @@ export function DiaryEditScreen({ navigation, route }: Props) {
             })}
           </ScrollView>
 
-          <HomeBookShell contentStyle={styles.bookContent}>
+          <HomeBookShell
+            style={styles.bookShell}
+            contentStyle={styles.bookContent}
+            coverColor={coverColor}
+            spineWidth={18}
+            spineOffsetX={-8}
+            hideSpineRidges
+            hidePageEdge
+          >
             <View style={styles.pageWrap}>
               <DiaryPageCanvas
+                style={styles.pageCanvas}
                 photos={photos}
                 photoById={photoById}
                 stickers={stickers}
@@ -617,42 +702,41 @@ export function DiaryEditScreen({ navigation, route }: Props) {
                   <Ionicons name="trash-outline" size={trashHot ? 22 : 18} color={colors.white} />
                 </View>
               ) : null}
-            </View>
 
-            <View style={styles.timeline}>
-              <View style={styles.timelineLine} />
-              <ScrollView
-                horizontal
-                showsHorizontalScrollIndicator={false}
-                contentContainerStyle={styles.markersRow}
-              >
-                {dayPlaces.map((place) => {
-                  const selected = place.id === activePlace?.id;
-                  return (
-                    <Pressable
-                      key={place.id}
-                      onPress={() => selectPlace(place.id)}
-                      style={({ pressed }) => [
-                        styles.markerBtn,
-                        selected && styles.markerSelected,
-                        pressed && styles.pressed,
-                      ]}
-                      accessibilityRole="button"
-                      accessibilityState={{ selected }}
-                      accessibilityLabel={place.placeName}
-                    >
-                      <View style={[styles.markerDot, selected && styles.markerDotActive]} />
-                    </Pressable>
-                  );
-                })}
-              </ScrollView>
+              <View style={styles.timeline}>
+                <View style={styles.timelineLine} />
+                <ScrollView
+                  horizontal
+                  showsHorizontalScrollIndicator={false}
+                  contentContainerStyle={styles.markersRow}
+                >
+                  {dayPlaces.map((place) => {
+                    const selected = place.id === activePlace?.id;
+                    return (
+                      <Pressable
+                        key={place.id}
+                        onPress={() => selectPlace(place.id)}
+                        style={({ pressed }) => [
+                          styles.markerBtn,
+                          selected && styles.markerSelected,
+                          pressed && styles.pressed,
+                        ]}
+                        accessibilityRole="button"
+                        accessibilityState={{ selected }}
+                        accessibilityLabel={place.placeName}
+                      >
+                        <View style={[styles.markerDot, selected && styles.markerDotActive]} />
+                      </Pressable>
+                    );
+                  })}
+                </ScrollView>
+              </View>
             </View>
           </HomeBookShell>
         </View>
       </View>
 
       <View style={[styles.toolDock, { paddingBottom: Math.max(insets.bottom, 12) }]}>
-        <Text style={styles.toolDockLabel}>편집 도구</Text>
         <View style={styles.toolRow}>
           <Pressable
             onPress={() => {
@@ -745,11 +829,6 @@ export function DiaryEditScreen({ navigation, route }: Props) {
           behavior={Platform.OS === 'ios' ? 'padding' : undefined}
         >
           <Pressable style={styles.textModalDim} onPress={commitTextDraft} />
-          <SafeAreaView edges={['top']} style={styles.textModalTop}>
-            <Pressable onPress={commitTextDraft} style={styles.doneChip}>
-              <Text style={styles.doneChipText}>완료</Text>
-            </Pressable>
-          </SafeAreaView>
           <View style={styles.textComposer}>
             <View style={styles.textField}>
               <Text
@@ -838,28 +917,40 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   doneChipText: { ...typography.label, color: colors.white },
-  body: { flex: 1, paddingTop: spacing.xs },
-  bookStack: { flex: 1 },
+  body: {
+    flex: 1,
+    paddingTop: spacing.xs,
+    overflow: 'visible',
+  },
+  bookStack: {
+    flex: 1,
+    paddingTop: 32,
+    overflow: 'visible',
+  },
   indexScroll: {
     position: 'absolute',
-    top: 2,
-    left: spacing.xl + 32,
+    top: 0,
+    left: spacing.xl + 22,
     right: spacing.xl + 18,
-    zIndex: 3,
-    height: 24,
+    height: 32,
+    zIndex: 20,
+    elevation: 20,
   },
   indexTabs: {
     flexDirection: 'row',
-    alignItems: 'flex-start',
+    alignItems: 'flex-end',
+    height: 32,
     gap: 5,
     paddingHorizontal: 2,
   },
   indexTab: {
-    minWidth: 76,
-    height: 22,
+    minWidth: 50,
+    height: 28,
     paddingHorizontal: 16,
-    borderTopLeftRadius: 6,
-    borderTopRightRadius: 6,
+    borderTopLeftRadius: 0,
+    borderTopRightRadius: 0,
+    borderBottomLeftRadius: 0,
+    borderBottomRightRadius: 0,
     backgroundColor: '#2A2A2A',
     borderWidth: 1,
     borderBottomWidth: 0,
@@ -868,9 +959,9 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   indexTabActive: {
-    backgroundColor: '#F7F3EA',
-    borderColor: '#E8E2D4',
-    height: 24,
+    backgroundColor: '#A63030',
+    borderColor: '#A63030',
+    height: 30,
   },
   indexTabText: {
     fontSize: 11,
@@ -878,30 +969,58 @@ const styles = StyleSheet.create({
     color: '#A3A3A3',
     textAlign: 'center',
   },
-  indexTabTextActive: { color: '#1A1A1A' },
-  bookContent: {
-    paddingTop: spacing.xxl + 4,
-    paddingBottom: spacing.lg,
-    paddingHorizontal: spacing.md,
-    paddingRight: spacing.xxl,
+  indexTabTextActive: { color: '#FFFFFF' },
+  bookShell: {
+    flex: 1,
+    borderRadius: 0,
+    borderTopLeftRadius: 15,
+    borderBottomLeftRadius: 15,
+    borderTopRightRadius: 28,
+    borderBottomRightRadius: 28,
   },
-  pageWrap: { flex: 1, marginBottom: spacing.sm },
+  bookContent: {
+    paddingTop: 9,
+    paddingBottom: 9,
+    paddingLeft: 4,
+    paddingRight: 8,
+  },
+  pageWrap: {
+    flex: 1,
+    position: 'relative',
+  },
+  pageCanvas: {
+    marginRight: 0,
+    borderRadius: 0,
+    borderTopLeftRadius: 2,
+    borderBottomLeftRadius: 2,
+    borderTopRightRadius: 22,
+    borderBottomRightRadius: 22,
+  },
   trashChip: {
     position: 'absolute',
     alignSelf: 'center',
-    bottom: 10,
+    bottom: 48,
     width: 44,
     height: 44,
     borderRadius: 22,
     backgroundColor: 'rgba(0,0,0,0.55)',
     alignItems: 'center',
     justifyContent: 'center',
+    zIndex: 6,
   },
   trashChipHot: {
     backgroundColor: 'rgba(214,69,69,0.9)',
     transform: [{ scale: 1.08 }],
   },
-  timeline: { minHeight: 36, justifyContent: 'center', paddingBottom: 2 },
+  timeline: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    bottom: 0,
+    height: 40,
+    justifyContent: 'center',
+    zIndex: 5,
+  },
   timelineLine: {
     position: 'absolute',
     left: 8,
@@ -909,49 +1028,44 @@ const styles = StyleSheet.create({
     top: '50%',
     marginTop: -1,
     height: 2,
-    backgroundColor: '#6B6B6B',
+    backgroundColor: 'rgba(0,0,0,0.22)',
   },
   markersRow: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 28,
-    paddingHorizontal: 4,
+    paddingHorizontal: 8,
   },
   markerBtn: {
     width: 28,
     height: 28,
     alignItems: 'center',
     justifyContent: 'center',
-    opacity: 0.5,
+    opacity: 0.55,
   },
   markerSelected: { opacity: 1 },
   markerDot: {
     width: 10,
     height: 10,
     borderRadius: 5,
-    backgroundColor: '#C8C8C8',
+    backgroundColor: '#8A8A8A',
     borderWidth: 2,
-    borderColor: '#8A8A8A',
+    borderColor: '#5A5A5A',
   },
   markerDotActive: {
     width: 12,
     height: 12,
     borderRadius: 6,
-    backgroundColor: '#F7F3EA',
+    backgroundColor: colors.black,
     borderColor: colors.white,
   },
   toolDock: {
+    marginTop: 25,
     borderTopWidth: StyleSheet.hairlineWidth,
     borderTopColor: colors.border,
     backgroundColor: colors.white,
-    paddingTop: spacing.sm,
+    paddingTop: spacing.xs,
     paddingHorizontal: spacing.lg,
-  },
-  toolDockLabel: {
-    ...typography.label,
-    fontSize: 11,
-    color: colors.inkMuted,
-    marginBottom: spacing.xs,
   },
   toolRow: { flexDirection: 'row', justifyContent: 'space-around' },
   toolItem: { alignItems: 'center', gap: 4, minWidth: 64, paddingVertical: spacing.sm },
@@ -993,7 +1107,6 @@ const styles = StyleSheet.create({
   stickerCellText: { fontSize: 28 },
   textModalRoot: { flex: 1 },
   textModalDim: { ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(0,0,0,0.72)' },
-  textModalTop: { alignItems: 'flex-end', paddingHorizontal: spacing.lg },
   textComposer: { flex: 1, justifyContent: 'center', paddingHorizontal: spacing.xl },
   textField: { minHeight: 120 },
   textInput: { fontSize: 28, fontWeight: '600', textAlign: 'center' },

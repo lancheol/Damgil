@@ -22,7 +22,9 @@
         "CAMERA",
         "RECORD_AUDIO",
         "READ_MEDIA_IMAGES",
-        "READ_EXTERNAL_STORAGE"
+        "READ_EXTERNAL_STORAGE",
+        "ACCESS_COARSE_LOCATION",
+        "ACCESS_FINE_LOCATION"
       ],
       "adaptiveIcon": {
         "backgroundColor": "#E6F4FE",
@@ -58,6 +60,12 @@
         "expo-image-picker",
         {
           "photosPermission": "다이어리 꾸미기를 위해 사진 라이브러리 접근이 필요합니다."
+        }
+      ],
+      [
+        "expo-location",
+        {
+          "locationWhenInUsePermission": "여행 장소 기록을 위해 위치 접근이 필요합니다."
         }
       ],
       "expo-video"

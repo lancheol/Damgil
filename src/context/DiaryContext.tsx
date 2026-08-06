@@ -109,6 +109,8 @@ function withUpdatedAt(cover: Omit<DiaryCover, 'updatedAt'> | DiaryCover): Diary
     ...cover,
     title: cover.title.trim(),
     stickers: cover.stickers ?? [],
+    photos: Array.isArray(cover.photos) ? cover.photos : [],
+    texts: Array.isArray(cover.texts) ? cover.texts : [],
     updatedAt: new Date().toISOString(),
   };
 }

@@ -1,7 +1,13 @@
 import { Image, Pressable, StyleSheet, Text, View } from 'react-native';
 
 import { Diary } from '../../types/diary';
-import { getCoverFontStyle, getEffectiveCover, resolveCoverImageUri } from '../../utils/diaryCover';
+import {
+  getCoverBackgroundColor,
+  getCoverFontStyle,
+  getCoverTitleColor,
+  getEffectiveCover,
+  resolveCoverImageUri,
+} from '../../utils/diaryCover';
 import { colors, radii, spacing, typography } from '../../theme';
 
 type DiaryBookCardProps = {
@@ -13,6 +19,12 @@ export function DiaryBookCard({ diary, onPress }: DiaryBookCardProps) {
   const cover = getEffectiveCover(diary);
   const coverUri = resolveCoverImageUri(diary, cover);
   const title = cover.title?.trim() || diary.name;
+  const coverBg = getCoverBackgroundColor(cover);
+  const titleColor = getCoverTitleColor(coverBg);
+  const muted = titleColor === '#FFFFFF' ? '#9A9A9A' : '#6B6B6B';
+  const soft = titleColor === '#FFFFFF' ? '#B5B5B5' : '#666666';
+  const line = titleColor === '#FFFFFF' ? '#2E2E2E' : '#D4D4D4';
+  const divider = titleColor === '#FFFFFF' ? '#3A3A3A' : '#C4C4C4';
 
   return (
     <Pressable
@@ -27,19 +39,22 @@ export function DiaryBookCard({ diary, onPress }: DiaryBookCardProps) {
         <View style={styles.spineRidge} />
       </View>
 
-      <View style={styles.cover}>
+      <View style={[styles.cover, { backgroundColor: coverBg }]}>
         {coverUri ? (
           <Image source={{ uri: coverUri }} style={styles.coverImage} resizeMode="cover" />
         ) : null}
-        <View style={styles.coverDim} />
+        {coverUri ? <View style={styles.coverDim} /> : null}
 
-        <View style={styles.cornerMark} />
-        <Text style={styles.brand}>담길 DIARY</Text>
-        <View style={styles.divider} />
-        <Text style={[styles.title, getCoverFontStyle(cover.fontId)]} numberOfLines={3}>
+        <View style={[styles.cornerMark, { borderColor: muted }]} />
+        <Text style={[styles.brand, { color: muted }]}>담길 DIARY</Text>
+        <View style={[styles.divider, { backgroundColor: divider }]} />
+        <Text
+          style={[styles.title, getCoverFontStyle(cover.fontId), { color: titleColor }]}
+          numberOfLines={3}
+        >
           {title}
         </Text>
-        <Text style={styles.place} numberOfLines={2}>
+        <Text style={[styles.place, { color: soft }]} numberOfLines={2}>
           {diary.place}
         </Text>
 
@@ -65,9 +80,11 @@ export function DiaryBookCard({ diary, onPress }: DiaryBookCardProps) {
         ))}
 
         <View style={styles.footer}>
-          <Text style={styles.footerLabel}>TRAVEL LOG</Text>
-          <Text style={styles.photoCount}>기록 {diary.photos?.length ?? 0}장</Text>
-          <View style={styles.footerLine} />
+          <Text style={[styles.footerLabel, { color: muted }]}>TRAVEL LOG</Text>
+          <Text style={[styles.photoCount, { color: soft }]}>
+            기록 {diary.photos?.length ?? 0}장
+          </Text>
+          <View style={[styles.footerLine, { backgroundColor: line }]} />
         </View>
       </View>
 
