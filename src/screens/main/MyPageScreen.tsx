@@ -1,11 +1,14 @@
+import { Ionicons } from '@expo/vector-icons';
 import { CompositeScreenProps } from '@react-navigation/native';
 import { BottomTabScreenProps } from '@react-navigation/bottom-tabs';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
-import { useMemo } from 'react';
+import { useMemo, useState } from 'react';
 import {
+  Alert,
   Dimensions,
   FlatList,
   Image,
+  Modal,
   Pressable,
   StyleSheet,
   Text,
@@ -34,20 +37,14 @@ const H_PADDING = 20;
 const GRID_GAP = 12;
 const CARD_WIDTH = (Dimensions.get('window').width - H_PADDING * 2 - GRID_GAP) / 2;
 
-function formatDiaryDate(iso: string): string {
-  const date = new Date(iso);
-  const yyyy = date.getFullYear();
-  const mm = String(date.getMonth() + 1).padStart(2, '0');
-  const dd = String(date.getDate()).padStart(2, '0');
-  return `${yyyy}.${mm}.${dd}`;
-}
-
 export function MyPageScreen({ navigation }: Props) {
   const { user } = useAuth();
-  const { diaries } = useDiaries();
+  const { diaries, deleteDiary } = useDiaries();
 
   const username = user?.username ?? 'traveler';
   const bio = user?.bio ?? '매주 새로운 곳을 기록하는 다이어리 ✈️';
+
+  const [menuDiary, setMenuDiary] = useState<Diary | null>(null);
 
   const coverDiaries = useMemo(
     () =>
@@ -58,6 +55,31 @@ export function MyPageScreen({ navigation }: Props) {
         ),
     [diaries],
   );
+
+  const openDiary = (diary: Diary) => {
+    const isDraft = Boolean(diary.coverDraft) && !diary.cover;
+    if (isDraft) {
+      navigation.navigate('DiaryCoverEdit', { diaryId: diary.id });
+      return;
+    }
+    navigation.navigate('DiaryEdit', { diaryId: diary.id });
+  };
+
+  const confirmDelete = (diary: Diary) => {
+    const title = getEffectiveCover(diary).title?.trim() || diary.name;
+    Alert.alert('다이어리 삭제', `'${title}'을(를) 삭제할까요?\n기록한 사진과 꾸미기가 모두 사라집니다.`, [
+      { text: '취소', style: 'cancel' },
+      {
+        text: '삭제',
+        style: 'destructive',
+        onPress: () => {
+          if (!deleteDiary(diary.id)) {
+            Alert.alert('삭제 실패', '다이어리를 삭제하지 못했어요.');
+          }
+        },
+      },
+    ]);
+  };
 
   const renderDiaryCard = ({ item }: { item: Diary }) => {
     const cover = getEffectiveCover(item);
@@ -71,13 +93,7 @@ export function MyPageScreen({ navigation }: Props) {
     return (
       <Pressable
         accessibilityRole="button"
-        onPress={() => {
-          if (isDraft) {
-            navigation.navigate('DiaryCoverEdit', { diaryId: item.id });
-            return;
-          }
-          navigation.navigate('DiaryEdit', { diaryId: item.id });
-        }}
+        onPress={() => openDiary(item)}
         style={styles.card}
       >
         <View style={[styles.thumb, { backgroundColor: coverColor }]}>
@@ -106,11 +122,17 @@ export function MyPageScreen({ navigation }: Props) {
             <MyPageHeartIcon size={10} />
             <Text style={styles.likeCount}>{likeCount}</Text>
           </View>
+
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel={`${title} 더보기`}
+            hitSlop={8}
+            onPress={() => setMenuDiary(item)}
+            style={({ pressed }) => [styles.moreButton, pressed && styles.pressed]}
+          >
+            <Ionicons name="ellipsis-vertical" size={16} color={colors.white} />
+          </Pressable>
         </View>
-        <Text style={styles.cardTitle} numberOfLines={1}>
-          {title}
-        </Text>
-        <Text style={styles.cardDate}>{formatDiaryDate(item.endedAt ?? item.createdAt)}</Text>
       </Pressable>
     );
   };
@@ -169,6 +191,51 @@ export function MyPageScreen({ navigation }: Props) {
         }
         renderItem={renderDiaryCard}
       />
+
+      <Modal
+        visible={Boolean(menuDiary)}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setMenuDiary(null)}
+      >
+        <Pressable style={styles.menuBackdrop} onPress={() => setMenuDiary(null)}>
+          <Pressable style={styles.menuCard} onPress={() => undefined}>
+            <Text style={styles.menuTitle} numberOfLines={1}>
+              {menuDiary ? getEffectiveCover(menuDiary).title?.trim() || menuDiary.name : ''}
+            </Text>
+
+            <Pressable
+              accessibilityRole="button"
+              onPress={() => {
+                const target = menuDiary;
+                setMenuDiary(null);
+                if (target) {
+                  openDiary(target);
+                }
+              }}
+              style={({ pressed }) => [styles.menuItem, pressed && styles.pressed]}
+            >
+              <Ionicons name="create-outline" size={18} color={colors.ink} />
+              <Text style={styles.menuItemText}>수정</Text>
+            </Pressable>
+
+            <Pressable
+              accessibilityRole="button"
+              onPress={() => {
+                const target = menuDiary;
+                setMenuDiary(null);
+                if (target) {
+                  confirmDelete(target);
+                }
+              }}
+              style={({ pressed }) => [styles.menuItem, pressed && styles.pressed]}
+            >
+              <Ionicons name="trash-outline" size={18} color={colors.danger} />
+              <Text style={[styles.menuItemText, styles.menuItemDanger]}>삭제</Text>
+            </Pressable>
+          </Pressable>
+        </Pressable>
+      </Modal>
     </SafeAreaView>
   );
 }
@@ -290,7 +357,7 @@ const styles = StyleSheet.create({
     position: 'absolute',
     top: 8,
     left: 8,
-    right: 8,
+    right: 38,
     flexDirection: 'row',
     flexWrap: 'wrap',
     gap: 4,
@@ -325,14 +392,52 @@ const styles = StyleSheet.create({
     fontSize: 10,
     color: colors.white,
   },
-  cardTitle: {
-    fontSize: 12,
-    fontWeight: '600',
-    color: '#1E2939',
+  moreButton: {
+    position: 'absolute',
+    top: 6,
+    right: 6,
+    width: 26,
+    height: 26,
+    borderRadius: 13,
+    backgroundColor: 'rgba(0,0,0,0.4)',
+    alignItems: 'center',
+    justifyContent: 'center',
   },
-  cardDate: {
-    fontSize: 10,
-    color: '#99A1AF',
+  menuBackdrop: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.45)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: spacing.xl,
+  },
+  menuCard: {
+    width: '100%',
+    maxWidth: 300,
+    backgroundColor: colors.white,
+    borderRadius: radii.lg,
+    paddingHorizontal: spacing.lg,
+    paddingVertical: spacing.md,
+    gap: spacing.xs,
+  },
+  menuTitle: {
+    ...typography.label,
+    color: colors.inkMuted,
+    paddingVertical: spacing.sm,
+  },
+  menuItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.md,
+    minHeight: 48,
+    paddingHorizontal: spacing.xs,
+  },
+  menuItemText: {
+    ...typography.button,
+    fontSize: 15,
+    color: colors.ink,
+  },
+  menuItemDanger: {
+    color: colors.danger,
   },
   empty: {
     paddingTop: spacing.xxl,

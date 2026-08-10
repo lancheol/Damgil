@@ -7,13 +7,10 @@ import {
   useState,
 } from 'react';
 
-import { VisibilityRange } from '../utils/authValidation';
-
 export type SignUpPayload = {
   username: string;
   password: string;
   phone: string;
-  visibility: VisibilityRange;
 };
 
 export type UpdateProfileInput = {

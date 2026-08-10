@@ -12,6 +12,7 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { BackButton } from '../../components/common/BackButton';
+import { DismissKeyboardView } from '../../components/common/DismissKeyboardView';
 import { useDiaries } from '../../context/DiaryContext';
 import { RootStackParamList } from '../../navigation/types';
 import { colors, radii, spacing, typography } from '../../theme';
@@ -54,7 +55,7 @@ export function CreateDiaryScreen({ navigation }: Props) {
           <BackButton onPress={() => navigation.goBack()} />
         </View>
 
-        <View style={styles.body}>
+        <DismissKeyboardView style={styles.body}>
           <View style={styles.card}>
             <View style={styles.paper}>
               <View style={styles.tape} />
@@ -112,7 +113,7 @@ export function CreateDiaryScreen({ navigation }: Props) {
               <Text style={styles.startText}>Travel Start</Text>
             </Pressable>
           </View>
-        </View>
+        </DismissKeyboardView>
       </KeyboardAvoidingView>
     </SafeAreaView>
   );

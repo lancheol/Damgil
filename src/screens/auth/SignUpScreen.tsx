@@ -20,12 +20,7 @@ import { DamgilLogo } from '../../components/home/DamgilLogo';
 import { useAuth } from '../../context/AuthContext';
 import { AuthStackParamList, TermsType } from '../../navigation/types';
 import { colors, radii, spacing, typography } from '../../theme';
-import {
-  isValidPhone,
-  normalizePhone,
-  validateSignUpForm,
-  VisibilityRange,
-} from '../../utils/authValidation';
+import { isValidPhone, normalizePhone, validateSignUpForm } from '../../utils/authValidation';
 import {
   getSignupTermsState,
   resetSignupTermsState,
@@ -54,8 +49,6 @@ export function SignUpScreen({ navigation }: Props) {
   const [hasReadPrivacy, setHasReadPrivacy] = useState(initialTerms.hasReadPrivacy);
   const [agreedService, setAgreedService] = useState(initialTerms.agreedService);
   const [agreedPrivacy, setAgreedPrivacy] = useState(initialTerms.agreedPrivacy);
-
-  const [visibility, setVisibility] = useState<VisibilityRange | null>(null);
 
   const [errors, setErrors] = useState<FormErrors>({});
   const [submitting, setSubmitting] = useState(false);
@@ -137,12 +130,11 @@ export function SignUpScreen({ navigation }: Props) {
       phoneVerified,
       agreedService,
       agreedPrivacy,
-      visibility,
     });
     setErrors(nextErrors);
     setFormError(null);
 
-    if (Object.keys(nextErrors).length > 0 || !visibility) {
+    if (Object.keys(nextErrors).length > 0) {
       return;
     }
 
@@ -152,7 +144,6 @@ export function SignUpScreen({ navigation }: Props) {
         username: username.trim(),
         password,
         phone: normalizePhone(phone),
-        visibility,
       });
       resetSignupTermsState();
     } catch {
@@ -174,6 +165,7 @@ export function SignUpScreen({ navigation }: Props) {
         <ScrollView
           contentContainerStyle={styles.content}
           keyboardShouldPersistTaps="handled"
+          keyboardDismissMode="on-drag"
           showsVerticalScrollIndicator={false}
         >
           <View style={styles.brand}>
@@ -308,25 +300,6 @@ export function SignUpScreen({ navigation }: Props) {
               {errors.terms ? <Text style={styles.inlineError}>{errors.terms}</Text> : null}
             </View>
 
-            <View style={styles.section}>
-              <Text style={styles.sectionLabel}>공개 범위 설정</Text>
-              <View style={styles.visibilityRow}>
-                <VisibilityChip
-                  label="공개"
-                  selected={visibility === 'public'}
-                  onPress={() => setVisibility('public')}
-                />
-                <VisibilityChip
-                  label="비공개"
-                  selected={visibility === 'private'}
-                  onPress={() => setVisibility('private')}
-                />
-              </View>
-              {errors.visibility ? (
-                <Text style={styles.inlineError}>{errors.visibility}</Text>
-              ) : null}
-            </View>
-
             {formError ? <Text style={styles.formError}>{formError}</Text> : null}
 
             <Pressable
@@ -392,27 +365,6 @@ function TermsRow({ title, agreed, hasRead, onPressRead, onToggleAgree }: TermsR
         <Text style={styles.readButtonText}>읽기</Text>
       </Pressable>
     </View>
-  );
-}
-
-type VisibilityChipProps = {
-  label: string;
-  selected: boolean;
-  onPress: () => void;
-};
-
-function VisibilityChip({ label, selected, onPress }: VisibilityChipProps) {
-  return (
-    <Pressable
-      accessibilityRole="button"
-      accessibilityState={{ selected }}
-      onPress={onPress}
-      style={[styles.visibilityChip, selected && styles.visibilityChipSelected]}
-    >
-      <Text style={[styles.visibilityChipText, selected && styles.visibilityChipTextSelected]}>
-        {label}
-      </Text>
-    </Pressable>
   );
 }
 
@@ -579,31 +531,6 @@ const styles = StyleSheet.create({
   readButtonText: {
     ...typography.label,
     color: colors.ink,
-  },
-  visibilityRow: {
-    flexDirection: 'row',
-    gap: spacing.sm,
-  },
-  visibilityChip: {
-    flex: 1,
-    minHeight: 48,
-    borderRadius: radii.md,
-    borderWidth: 1,
-    borderColor: colors.border,
-    backgroundColor: colors.white,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  visibilityChipSelected: {
-    backgroundColor: colors.black,
-    borderColor: colors.black,
-  },
-  visibilityChipText: {
-    ...typography.label,
-    color: colors.inkSoft,
-  },
-  visibilityChipTextSelected: {
-    color: colors.white,
   },
   inlineError: {
     fontSize: 12,

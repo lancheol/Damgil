@@ -18,6 +18,7 @@ import * as ImagePicker from 'expo-image-picker';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { BackButton } from '../../components/common/BackButton';
+import { ColorWheelPicker, ColorWheelSwatch } from '../../components/common/ColorWheelPicker';
 import { CoverCanvas } from '../../components/diary/CoverCanvas';
 import { PhotoCropModal } from '../../components/diary/PhotoCropModal';
 import { HomeBookShell } from '../../components/home/HomeBookShell';
@@ -39,6 +40,7 @@ import {
   DECOR_TEXT_COLORS,
   DEFAULT_DECOR_TEXT_COLOR,
 } from '../../utils/decorAssets';
+import { isSameColor } from '../../utils/color';
 import { createDefaultPhotoLayer } from '../../utils/diaryPageDecoration';
 import { createTextLayer } from '../../utils/diaryTextLayers';
 import {
@@ -95,6 +97,7 @@ export function DiaryCoverEditScreen({ navigation, route }: Props) {
   const [dirty, setDirty] = useState(false);
   const [sheet, setSheet] = useState<ToolSheet>('none');
   const [cropOpen, setCropOpen] = useState(false);
+  const [customColorOpen, setCustomColorOpen] = useState(false);
 
   const [draftText, setDraftText] = useState('');
   const [draftFontId, setDraftFontId] = useState<DecorFontId>('sans');
@@ -133,7 +136,12 @@ export function DiaryCoverEditScreen({ navigation, route }: Props) {
     };
   }, [title, fontId, stickers, photos, texts, backgroundColor, diary?.name]);
 
+  // 여행 종료 직후에는 돌아갈 곳이 카메라 플로우라 마이페이지로 보낸다
   const leaveToMyPage = () => {
+    if (!fromTripEnd && navigation.canGoBack()) {
+      navigation.goBack();
+      return;
+    }
     navigation.navigate('Main', { screen: 'MyPage' });
   };
 
@@ -433,6 +441,7 @@ export function DiaryCoverEditScreen({ navigation, route }: Props) {
   }
 
   const showTrash = draggingLayer && sheet === 'none';
+  const isCustomColor = !COVER_COLORS.some((swatch) => isSameColor(swatch, backgroundColor));
 
   return (
     <SafeAreaView style={styles.safe} edges={['top']}>
@@ -453,6 +462,7 @@ export function DiaryCoverEditScreen({ navigation, route }: Props) {
           <HomeBookShell
             style={styles.bookShell}
             contentStyle={styles.bookContent}
+            coverColor={backgroundColor}
             spineWidth={18}
             spineOffsetX={-8}
             hideSpineRidges
@@ -716,7 +726,7 @@ export function DiaryCoverEditScreen({ navigation, route }: Props) {
             contentContainerStyle={styles.coverColorRow}
           >
             {COVER_COLORS.map((swatch) => {
-              const active = backgroundColor === swatch;
+              const active = isSameColor(backgroundColor, swatch);
               return (
                 <Pressable
                   key={swatch}
@@ -736,8 +746,38 @@ export function DiaryCoverEditScreen({ navigation, route }: Props) {
                 />
               );
             })}
+
+            <Pressable
+              onPress={() => setCustomColorOpen(true)}
+              style={[
+                styles.coverColorSwatch,
+                styles.coverColorCustom,
+                isCustomColor && styles.coverColorSwatchActive,
+              ]}
+              accessibilityRole="button"
+              accessibilityState={{ selected: isCustomColor }}
+              accessibilityLabel="표지 색상 직접 고르기"
+            >
+              {isCustomColor ? (
+                <View style={[styles.coverColorCustomFill, { backgroundColor }]} />
+              ) : (
+                <ColorWheelSwatch size={32} />
+              )}
+            </Pressable>
           </ScrollView>
         </View>
+
+        {customColorOpen ? (
+          <ColorWheelPicker
+            initialColor={backgroundColor}
+            onCancel={() => setCustomColorOpen(false)}
+            onConfirm={(hex) => {
+              setBackgroundColor(hex);
+              setCustomColorOpen(false);
+              markDirty();
+            }}
+          />
+        ) : null}
       </Modal>
 
       <Modal
@@ -997,6 +1037,14 @@ const styles = StyleSheet.create({
   coverColorSwatchBorder: {
     borderWidth: StyleSheet.hairlineWidth,
     borderColor: '#D1D5DB',
+  },
+  coverColorCustom: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    overflow: 'hidden',
+  },
+  coverColorCustomFill: {
+    ...StyleSheet.absoluteFillObject,
   },
   coverColorSwatchActive: {
     borderColor: colors.black,

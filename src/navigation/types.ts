@@ -1,5 +1,7 @@
 import { NavigatorScreenParams } from '@react-navigation/native';
 
+import { AiCourse, CreateAiCourseInput } from '../types/aiCourse';
+
 export type TermsType = 'service' | 'privacy';
 
 export type AuthStackParamList = {
@@ -22,6 +24,13 @@ export type RootStackParamList = {
   Settings: undefined;
   ProfileEdit: undefined;
   CreateDiary: undefined;
+  FestivalList: undefined;
+  TravelSubsidy: undefined;
+  MapRoute: { placeId: string };
+  AICourseCreate: undefined;
+  AICourseLoading: { input: CreateAiCourseInput };
+  AICourseResult: { course: AiCourse };
+  AICourseMap: { course: AiCourse };
   DiaryCamera: { diaryId: string };
   DiaryPhotoEntry: { diaryId: string; photoUri: string; mediaType?: 'photo' | 'video' };
   DiaryPhotoGallery: { diaryId: string };

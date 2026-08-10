@@ -143,7 +143,7 @@ export function DiaryEditScreen({ navigation, route }: Props) {
 
   const [draftText, setDraftText] = useState('');
   const [draftFontId, setDraftFontId] = useState<DecorFontId>('sans');
-  const [draftColor, setDraftColor] = useState(DEFAULT_DECOR_TEXT_COLOR);
+  const [draftColor, setDraftColor] = useState<string>(DEFAULT_DECOR_TEXT_COLOR);
   const [editingTextId, setEditingTextId] = useState<string | null>(null);
 
   const trashHotRef = useRef(false);
@@ -512,6 +512,14 @@ export function DiaryEditScreen({ navigation, route }: Props) {
     navigation.goBack();
   };
 
+  const handleEditCover = () => {
+    if (dirtyRef.current && !persistCurrent()) {
+      Alert.alert('저장 실패', '페이지를 저장하지 못했어요.');
+      return;
+    }
+    navigation.navigate('DiaryCoverEdit', { diaryId });
+  };
+
   const handleBack = () => {
     if (!dirtyRef.current) {
       navigation.goBack();
@@ -553,6 +561,15 @@ export function DiaryEditScreen({ navigation, route }: Props) {
       <View style={styles.topBar}>
         <BackButton onPress={handleBack} />
         <Text style={styles.screenTitle}>다이어리 꾸미기</Text>
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel="표지 꾸미기"
+          onPress={handleEditCover}
+          style={({ pressed }) => [styles.coverChip, pressed && styles.pressed]}
+        >
+          <Ionicons name="book-outline" size={14} color={colors.ink} />
+          <Text style={styles.coverChipText}>표지</Text>
+        </Pressable>
         <Pressable onPress={handleDone} style={({ pressed }) => [styles.doneChip, pressed && styles.pressed]}>
           <Text style={styles.doneChipText}>완료</Text>
         </Pressable>
@@ -908,6 +925,18 @@ const styles = StyleSheet.create({
     fontSize: 18,
     color: colors.ink,
   },
+  coverChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    minHeight: 34,
+    paddingHorizontal: spacing.sm,
+    borderRadius: radii.pill,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: colors.border,
+    backgroundColor: colors.white,
+  },
+  coverChipText: { ...typography.label, fontSize: 12, color: colors.ink },
   doneChip: {
     minHeight: 34,
     paddingHorizontal: spacing.md,

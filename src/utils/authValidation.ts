@@ -1,8 +1,6 @@
 const USERNAME_PATTERN = /^[a-zA-Z0-9._]{3,20}$/;
 const PHONE_PATTERN = /^01[016789]\d{7,8}$/;
 
-export type VisibilityRange = 'public' | 'private';
-
 export function isValidUsername(username: string): boolean {
   return USERNAME_PATTERN.test(username.trim());
 }
@@ -44,7 +42,6 @@ export type SignUpFormErrors = {
   phone?: string;
   phoneVerified?: string;
   terms?: string;
-  visibility?: string;
 };
 
 export function validateSignUpForm(input: {
@@ -55,7 +52,6 @@ export function validateSignUpForm(input: {
   phoneVerified: boolean;
   agreedService: boolean;
   agreedPrivacy: boolean;
-  visibility: VisibilityRange | null;
 }): SignUpFormErrors {
   const errors: SignUpFormErrors = {
     ...validateLoginForm({
@@ -80,10 +76,6 @@ export function validateSignUpForm(input: {
 
   if (!input.agreedService || !input.agreedPrivacy) {
     errors.terms = '약관을 읽고 모두 동의해 주세요.';
-  }
-
-  if (!input.visibility) {
-    errors.visibility = '공개 범위를 선택해 주세요.';
   }
 
   return errors;
