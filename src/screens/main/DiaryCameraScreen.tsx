@@ -1,5 +1,5 @@
-import { CameraType, CameraView, useCameraPermissions, useMicrophonePermissions } from 'expo-camera';
-import { useRef, useState } from 'react';
+import { CameraType, CameraOrientation, CameraView, useCameraPermissions, useMicrophonePermissions } from 'expo-camera';
+import { useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
@@ -14,6 +14,8 @@ import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { BackButton } from '../../components/common/BackButton';
 import { RootStackParamList } from '../../navigation/types';
 import { DiaryMediaType } from '../../types/diary';
+import { normalizePhotoDimensions } from '../../utils/mediaDimensions';
+import { readDeviceLandscape, subscribeDeviceLandscape } from '../../utils/deviceOrientation';
 import { colors, radii, spacing, typography } from '../../theme';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'DiaryCamera'>;
@@ -28,12 +30,31 @@ export function DiaryCameraScreen({ navigation, route }: Props) {
   const [mode, setMode] = useState<CaptureMode>('picture');
   const [taking, setTaking] = useState(false);
   const [recording, setRecording] = useState(false);
+  const cameraOrientationRef = useRef<CameraOrientation | null>(null);
+  const deviceLandscapeRef = useRef<boolean | undefined>(undefined);
 
-  const goToEntry = (uri: string, mediaType: DiaryMediaType) => {
+  useEffect(() => {
+    return subscribeDeviceLandscape((landscape) => {
+      if (landscape != null) {
+        deviceLandscapeRef.current = landscape;
+      }
+    });
+  }, []);
+
+  const goToEntry = (
+    uri: string,
+    mediaType: DiaryMediaType,
+    mediaWidth?: number,
+    mediaHeight?: number,
+    captureLandscape?: boolean,
+  ) => {
     navigation.navigate('DiaryPhotoEntry', {
       diaryId,
       photoUri: uri,
       mediaType,
+      mediaWidth,
+      mediaHeight,
+      captureLandscape,
     });
   };
 
@@ -60,13 +81,25 @@ export function DiaryCameraScreen({ navigation, route }: Props) {
       const photo = await cameraRef.current.takePictureAsync({
         quality: 0.85,
         skipProcessing: false,
+        exif: true,
       });
 
       if (!photo?.uri) {
         return;
       }
 
-      goToEntry(photo.uri, 'photo');
+      const deviceLandscape =
+        deviceLandscapeRef.current ??
+        (await readDeviceLandscape(cameraOrientationRef.current));
+
+      const dims = normalizePhotoDimensions(
+        photo.width,
+        photo.height,
+        photo.exif as Record<string, unknown> | undefined,
+        deviceLandscape,
+      );
+
+      goToEntry(photo.uri, 'photo', dims.width, dims.height, dims.width > dims.height);
     } catch {
       Alert.alert('촬영 실패', '사진을 저장하지 못했습니다. 잠시 후 다시 시도해 주세요.');
     } finally {
@@ -165,6 +198,10 @@ export function DiaryCameraScreen({ navigation, route }: Props) {
         mode={mode}
         mute={false}
         videoQuality="720p"
+        responsiveOrientationWhenOrientationLocked
+        onResponsiveOrientationChanged={(event) => {
+          cameraOrientationRef.current = event.orientation;
+        }}
       />
 
       <View style={styles.controlsLayer} pointerEvents="box-none">

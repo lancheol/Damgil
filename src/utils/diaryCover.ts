@@ -1,5 +1,6 @@
 import { TextStyle } from 'react-native';
 
+import { clampStickerScale, normalizeRotation } from '../utils/stickerTransform';
 import {
   CoverFontId,
   DecorPhotoLayer,
@@ -15,15 +16,32 @@ import { normalizeCropRect } from './diaryTextLayers';
 export const COVER_FONTS = DECOR_FONTS;
 export const COVER_STICKER_EMOJIS = DECOR_STICKER_EMOJIS;
 
+export const COVER_TITLE_LAYER_ID = '__cover_title__';
 export const DEFAULT_COVER_COLOR = '#1A1A1A';
 export const DEFAULT_COVER_TITLE_X = 0.5;
 export const DEFAULT_COVER_TITLE_Y = 0.5;
+export const DEFAULT_COVER_TITLE_SCALE = 1;
+export const DEFAULT_COVER_TITLE_ROTATION = 0;
 
 export function clampCoverTitleAxis(value: number | undefined, fallback: number): number {
   if (typeof value !== 'number' || Number.isNaN(value)) {
     return fallback;
   }
   return Math.min(0.92, Math.max(0.08, value));
+}
+
+export function clampCoverTitleScale(value: number | undefined): number {
+  if (typeof value !== 'number' || Number.isNaN(value)) {
+    return DEFAULT_COVER_TITLE_SCALE;
+  }
+  return clampStickerScale(value);
+}
+
+export function clampCoverTitleRotation(value: number | undefined): number {
+  if (typeof value !== 'number' || Number.isNaN(value)) {
+    return DEFAULT_COVER_TITLE_ROTATION;
+  }
+  return normalizeRotation(value);
 }
 
 /** 표지 배경색 팔레트 (임의) */
@@ -66,6 +84,8 @@ export function createEmptyCover(title: string): DiaryCover {
     fontId: 'sans',
     titleX: DEFAULT_COVER_TITLE_X,
     titleY: DEFAULT_COVER_TITLE_Y,
+    titleScale: DEFAULT_COVER_TITLE_SCALE,
+    titleRotation: DEFAULT_COVER_TITLE_ROTATION,
     stickers: [],
     photos: [],
     texts: [],
@@ -74,14 +94,16 @@ export function createEmptyCover(title: string): DiaryCover {
   };
 }
 
-export function getEffectiveCover(diary: Diary): DiaryCover {
-  if (diary.cover) {
-    return diary.cover;
+export function getEffectiveCover(diary: Diary | null | undefined): DiaryCover {
+  if (!diary) {
+    return createEmptyCover('');
   }
-  if (diary.coverDraft) {
-    return diary.coverDraft;
-  }
-  return createEmptyCover(diary.name);
+  const fallback = diary.name?.trim() || '';
+  return (
+    normalizeCover(diary.cover, fallback) ??
+    normalizeCover(diary.coverDraft, fallback) ??
+    createEmptyCover(fallback)
+  );
 }
 
 export function getDefaultCoverPhoto(diary: Diary): DiaryPhoto | undefined {
@@ -129,6 +151,8 @@ export function normalizeCover(cover: DiaryCover | null | undefined, fallbackTit
     fontId: cover.fontId ?? 'sans',
     titleX: clampCoverTitleAxis(cover.titleX, DEFAULT_COVER_TITLE_X),
     titleY: clampCoverTitleAxis(cover.titleY, DEFAULT_COVER_TITLE_Y),
+    titleScale: clampCoverTitleScale(cover.titleScale),
+    titleRotation: clampCoverTitleRotation(cover.titleRotation),
     stickers: Array.isArray(cover.stickers) ? cover.stickers : [],
     photos: normalizeCoverPhotos(cover.photos),
     texts: normalizeCoverTexts(cover.texts),

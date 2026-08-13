@@ -61,12 +61,13 @@ export function DiaryPhotoGalleryScreen({ navigation, route }: Props) {
           text: '삭제',
           style: 'destructive',
           onPress: () => {
-            const ok = removePhotosFromDiary(diaryId, selectedIds);
-            if (!ok) {
-              Alert.alert('삭제 실패', '사진을 삭제하지 못했습니다.');
-              return;
-            }
-            exitSelectMode();
+            void (async () => {
+              const ok = await removePhotosFromDiary(diaryId, selectedIds);
+              if (!ok) {
+                return;
+              }
+              exitSelectMode();
+            })();
           },
         },
       ],

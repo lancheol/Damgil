@@ -1,8 +1,11 @@
 import { Ionicons } from '@expo/vector-icons';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 
+import { CoverThumb } from '../diary/CoverThumb';
 import { HomeBookShell } from './HomeBookShell';
+import { Diary } from '../../types/diary';
 import { colors, radii, spacing, typography } from '../../theme';
+import { getCoverBackgroundColor, getEffectiveCover } from '../../utils/diaryCover';
 
 const ACTIVE_GUIDE_LINES = [
   '(a) 다이어리를 눌러 촬영해주세요.',
@@ -12,20 +15,26 @@ const ACTIVE_GUIDE_LINES = [
 ] as const;
 
 type ActiveDiaryGuideCardProps = {
-  diaryName: string;
+  diary: Diary;
   onPress: () => void;
   onPressDelete: () => void;
 };
 
 export function ActiveDiaryGuideCard({
-  diaryName,
+  diary,
   onPress,
   onPressDelete,
 }: ActiveDiaryGuideCardProps) {
-  const title = diaryName.trim() || '나의 여행';
+  const title = diary?.name?.trim() || '나의 여행';
+  const cover = getEffectiveCover(diary);
+  const coverColor = getCoverBackgroundColor(cover);
+  const hasCoverLayout = Boolean(diary?.cover || diary?.coverDraft);
 
   return (
-    <HomeBookShell contentStyle={styles.coverContent}>
+    <HomeBookShell
+      coverColor={hasCoverLayout ? coverColor : undefined}
+      contentStyle={[styles.coverContent, hasCoverLayout && styles.coverFlush]}
+    >
       <Pressable
         accessibilityRole="button"
         accessibilityLabel="다이어리 삭제"
@@ -42,19 +51,25 @@ export function ActiveDiaryGuideCard({
         onPress={onPress}
         style={({ pressed }) => [styles.cardHit, pressed && styles.cardPressed]}
       >
-        <View style={styles.paper}>
-          <View style={styles.tape} />
-          <Text style={styles.paperTitle} numberOfLines={2}>
-            {title}
-          </Text>
-          <View style={styles.list}>
-            {ACTIVE_GUIDE_LINES.map((line) => (
-              <Text key={line} style={styles.paperLine}>
-                {line}
-              </Text>
-            ))}
+        {hasCoverLayout ? (
+          <View style={styles.coverPreview}>
+            <CoverThumb diary={diary} />
           </View>
-        </View>
+        ) : (
+          <View style={styles.paper}>
+            <View style={styles.tape} />
+            <Text style={styles.paperTitle} numberOfLines={2}>
+              {title}
+            </Text>
+            <View style={styles.list}>
+              {ACTIVE_GUIDE_LINES.map((line) => (
+                <Text key={line} style={styles.paperLine}>
+                  {line}
+                </Text>
+              ))}
+            </View>
+          </View>
+        )}
       </Pressable>
     </HomeBookShell>
   );
@@ -63,6 +78,13 @@ export function ActiveDiaryGuideCard({
 const styles = StyleSheet.create({
   coverContent: {
     position: 'relative',
+  },
+  coverFlush: {
+    paddingHorizontal: 0,
+    paddingTop: 9,
+    paddingBottom: 9,
+    paddingLeft: 0,
+    paddingRight: 14,
   },
   trashBtn: {
     position: 'absolute',
@@ -82,6 +104,11 @@ const styles = StyleSheet.create({
     flex: 1,
     alignItems: 'center',
     justifyContent: 'center',
+  },
+  coverPreview: {
+    flex: 1,
+    alignSelf: 'stretch',
+    overflow: 'hidden',
   },
   cardPressed: {
     opacity: 0.92,

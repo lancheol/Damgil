@@ -4,7 +4,6 @@ import { useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
-  Dimensions,
   Keyboard,
   KeyboardAvoidingView,
   Linking,
@@ -28,19 +27,26 @@ import { MapLocation, searchTravelPlaces } from '../../utils/placeSearch';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'DiaryPhotoEntry'>;
 
-const PREVIEW_WIDTH = Dimensions.get('window').width - spacing.xl * 2;
-const PREVIEW_HEIGHT = Math.round(PREVIEW_WIDTH * (9 / 16));
 const SEARCH_DEBOUNCE_MS = 280;
 
 export function DiaryPhotoEntryScreen({ navigation, route }: Props) {
-  const { diaryId, photoUri, mediaType = 'photo' } = route.params;
-  const { addPhotoToDiary } = useDiaries();
+  const {
+    diaryId,
+    photoUri,
+    mediaType = 'photo',
+    mediaWidth,
+    mediaHeight,
+    captureLandscape,
+  } = route.params;
+  const { addPhotoToDiary, prepareTripPhotoLocation } = useDiaries();
   const [placeQuery, setPlaceQuery] = useState('');
   const [searching, setSearching] = useState(false);
   const [suggestions, setSuggestions] = useState<MapLocation[]>([]);
   const [dropdownOpen, setDropdownOpen] = useState(false);
   const [candidate, setCandidate] = useState<MapLocation | null>(null);
   const [confirmedLocation, setConfirmedLocation] = useState<MapLocation | null>(null);
+  const [serverItemId, setServerItemId] = useState<string | null>(null);
+  const [confirmingLocation, setConfirmingLocation] = useState(false);
   const [rejectHint, setRejectHint] = useState(false);
   const searchSeqRef = useRef(0);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -96,6 +102,7 @@ export function DiaryPhotoEntryScreen({ navigation, route }: Props) {
     setPlaceQuery(text);
     setConfirmedLocation(null);
     setCandidate(null);
+    setServerItemId(null);
     setRejectHint(false);
     if (!text.trim()) {
       setSuggestions([]);
@@ -148,6 +155,7 @@ export function DiaryPhotoEntryScreen({ navigation, route }: Props) {
     setSuggestions([]);
     setDropdownOpen(false);
     setConfirmedLocation(null);
+    setServerItemId(null);
     setRejectHint(false);
     setCandidate(location);
   };
@@ -156,13 +164,46 @@ export function DiaryPhotoEntryScreen({ navigation, route }: Props) {
     if (!candidate) {
       return;
     }
-    setRejectHint(false);
-    setConfirmedLocation(candidate);
+    const placeContentId = candidate.contentId?.trim();
+    if (!placeContentId) {
+      Alert.alert('위치 확정 실패', '장소 ID가 없어요. 검색 결과에서 다시 선택해 주세요.');
+      return;
+    }
+
+    void (async () => {
+      setConfirmingLocation(true);
+      try {
+        const prepared = await prepareTripPhotoLocation({
+          diaryId,
+          mediaType,
+          latitude: candidate.latitude,
+          longitude: candidate.longitude,
+          placeName: candidate.name,
+          placeContentId,
+          serverItemId,
+        });
+        if (!prepared) {
+          return;
+        }
+
+        setServerItemId(prepared.serverItemId);
+        setRejectHint(false);
+        setConfirmedLocation({
+          name: prepared.placeName || candidate.name,
+          latitude: prepared.latitude,
+          longitude: prepared.longitude,
+          contentId: prepared.placeContentId,
+        });
+      } finally {
+        setConfirmingLocation(false);
+      }
+    })();
   };
 
   const handleRejectLocation = () => {
     setCandidate(null);
     setConfirmedLocation(null);
+    setServerItemId(null);
     setPlaceQuery('');
     setSuggestions([]);
     setDropdownOpen(false);
@@ -170,28 +211,43 @@ export function DiaryPhotoEntryScreen({ navigation, route }: Props) {
     setRejectHint(true);
   };
 
+  const handleMarkerDragEnd = (latitude: number, longitude: number) => {
+    if (confirmedLocation) {
+      setConfirmedLocation((prev) => (prev ? { ...prev, latitude, longitude } : prev));
+      return;
+    }
+    setCandidate((prev) => (prev ? { ...prev, latitude, longitude } : prev));
+  };
+
   const handleSubmit = () => {
     if (!confirmedLocation) {
       return;
     }
 
-    const saved = addPhotoToDiary({
-      diaryId,
-      uri: photoUri,
-      mediaType,
-      placeName: confirmedLocation.name,
-      latitude: confirmedLocation.latitude,
-      longitude: confirmedLocation.longitude,
-    });
+    void (async () => {
+      const saved = await addPhotoToDiary({
+        diaryId,
+        uri: photoUri,
+        mediaType,
+        placeName: confirmedLocation.name,
+        latitude: confirmedLocation.latitude,
+        longitude: confirmedLocation.longitude,
+        placeContentId: confirmedLocation.contentId,
+        serverItemId,
+      });
 
-    if (!saved) {
-      return;
-    }
+      if (!saved) {
+        return;
+      }
 
-    navigation.popToTop();
+      navigation.popToTop();
+    })();
   };
 
   const mapLocation = confirmedLocation ?? candidate;
+  const isLandscapePreview =
+    captureLandscape === true ||
+    (mediaWidth != null && mediaHeight != null && mediaWidth > mediaHeight);
 
   return (
     <SafeAreaView style={styles.safe} edges={['top', 'bottom']}>
@@ -204,7 +260,10 @@ export function DiaryPhotoEntryScreen({ navigation, route }: Props) {
         </View>
 
         <ScrollView
-          contentContainerStyle={styles.content}
+          contentContainerStyle={[
+            styles.content,
+            isLandscapePreview && styles.contentLandscape,
+          ]}
           keyboardShouldPersistTaps="handled"
           keyboardDismissMode="on-drag"
           showsVerticalScrollIndicator={false}
@@ -212,11 +271,16 @@ export function DiaryPhotoEntryScreen({ navigation, route }: Props) {
           <MediaPreview
             uri={photoUri}
             mediaType={mediaType}
-            style={styles.photoFrame}
-            landscape
+            fit="natural"
+            maxScreenHeightRatio={isLandscapePreview ? 0.42 : 0.55}
+            maxScreenWidthRatio={isLandscapePreview ? 1 : 0.92}
+            intrinsicWidth={mediaWidth}
+            intrinsicHeight={mediaHeight}
+            captureLandscape={captureLandscape}
+            style={isLandscapePreview ? styles.previewBleed : undefined}
           />
 
-          <View style={styles.placeSection}>
+          <View style={[styles.placeSection, isLandscapePreview && styles.paddedBlock]}>
             <Text style={styles.placeLabel}>Travel place</Text>
             <View style={styles.placeInputWrap}>
               <TextInput
@@ -273,9 +337,9 @@ export function DiaryPhotoEntryScreen({ navigation, route }: Props) {
           </View>
 
           {mapLocation ? (
-            <View style={styles.mapBlock}>
+            <View style={[styles.mapBlock, isLandscapePreview && styles.paddedBlock]}>
               <MapView
-                key={`${mapLocation.name}-${mapLocation.latitude}-${mapLocation.longitude}`}
+                key={`${mapLocation.name}-${mapLocation.contentId ?? 'local'}`}
                 style={styles.map}
                 initialRegion={{
                   latitude: mapLocation.latitude,
@@ -290,6 +354,11 @@ export function DiaryPhotoEntryScreen({ navigation, route }: Props) {
                     longitude: mapLocation.longitude,
                   }}
                   title={mapLocation.name}
+                  draggable={!confirmedLocation}
+                  onDragEnd={(event) => {
+                    const { latitude, longitude } = event.nativeEvent.coordinate;
+                    handleMarkerDragEnd(latitude, longitude);
+                  }}
                 />
               </MapView>
               <Text style={styles.mapName}>{mapLocation.name}</Text>
@@ -300,25 +369,31 @@ export function DiaryPhotoEntryScreen({ navigation, route }: Props) {
                   <View style={styles.confirmActions}>
                     <Pressable
                       accessibilityRole="button"
+                      disabled={confirmingLocation}
                       onPress={handleRejectLocation}
                       style={({ pressed }) => [
                         styles.choiceButton,
                         styles.noButton,
-                        pressed && styles.pressed,
+                        (pressed || confirmingLocation) && styles.pressed,
                       ]}
                     >
                       <Text style={styles.choiceButtonText}>아니오</Text>
                     </Pressable>
                     <Pressable
                       accessibilityRole="button"
+                      disabled={confirmingLocation}
                       onPress={handleConfirmLocation}
                       style={({ pressed }) => [
                         styles.choiceButton,
                         styles.yesButton,
-                        pressed && styles.pressed,
+                        (pressed || confirmingLocation) && styles.pressed,
                       ]}
                     >
-                      <Text style={styles.choiceButtonText}>예</Text>
+                      {confirmingLocation ? (
+                        <ActivityIndicator size="small" color={colors.white} />
+                      ) : (
+                        <Text style={styles.choiceButtonText}>예</Text>
+                      )}
                     </Pressable>
                   </View>
                 </View>
@@ -363,14 +438,20 @@ const styles = StyleSheet.create({
     paddingTop: spacing.sm,
   },
   content: {
-    paddingHorizontal: spacing.xl,
+    paddingHorizontal: spacing.lg,
     paddingBottom: spacing.xl,
-    gap: spacing.xl,
+    gap: spacing.lg,
   },
-  photoFrame: {
-    width: '100%',
-    height: PREVIEW_HEIGHT,
-    borderRadius: 10,
+  contentLandscape: {
+    paddingHorizontal: 0,
+    gap: spacing.md,
+  },
+  previewBleed: {
+    borderRadius: 0,
+    alignSelf: 'stretch',
+  },
+  paddedBlock: {
+    paddingHorizontal: spacing.lg,
   },
   placeSection: {
     gap: spacing.sm,

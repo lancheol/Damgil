@@ -59,7 +59,7 @@ function emptyDecoration(note = ''): PhotoDecoration {
 export function DiaryRecordDecorateScreen({ navigation, route }: Props) {
   const { diaryId, photoId } = route.params;
   const insets = useSafeAreaInsets();
-  const { getDiaryById, savePhotoDecoration } = useDiaries();
+  const { getDiaryById, savePhotoDecoration, loadPhotoDecoration } = useDiaries();
   const diary = getDiaryById(diaryId);
 
   const orderedIds = useMemo(() => {
@@ -98,6 +98,11 @@ export function DiaryRecordDecorateScreen({ navigation, route }: Props) {
   const [draftColor, setDraftColor] = useState<string>(DEFAULT_DECOR_TEXT_COLOR);
   const [editingTextId, setEditingTextId] = useState<string | null>(null);
 
+  const dirtyRef = useRef(false);
+  useEffect(() => {
+    dirtyRef.current = dirty;
+  }, [dirty]);
+
   useEffect(() => {
     if (!photo) {
       return;
@@ -112,10 +117,30 @@ export function DiaryRecordDecorateScreen({ navigation, route }: Props) {
     setTrashHot(false);
     trashHotRef.current = false;
     setDirty(false);
+    dirtyRef.current = false;
     setSheet('none');
     setEditingTextId(null);
     setCropOpen(false);
   }, [photoId, photo?.decoration?.updatedAt, photo?.id]);
+
+  // GET decoration — 재진입 시 서버에 저장된 꾸미기 복원 (없으면 null)
+  useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      const remote = await loadPhotoDecoration(diaryId, photoId);
+      if (cancelled || !remote || dirtyRef.current) {
+        return;
+      }
+      setStickers(remote.stickers);
+      setTexts(resolveDecorationTexts(remote));
+      setCropRect(remote.cropRect ?? null);
+      setDirty(false);
+      dirtyRef.current = false;
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [diaryId, photoId, loadPhotoDecoration]);
 
   const markDirty = useCallback(() => setDirty(true), []);
 
@@ -170,7 +195,7 @@ export function DiaryRecordDecorateScreen({ navigation, route }: Props) {
     [isOverDeleteChip],
   );
 
-  const persist = useCallback(() => {
+  const persist = useCallback(async () => {
     if (!diary || !photo) {
       return false;
     }
@@ -181,9 +206,9 @@ export function DiaryRecordDecorateScreen({ navigation, route }: Props) {
     });
   }, [diary, photo, diaryId, stickers, texts, cropRect, savePhotoDecoration]);
 
-  const goToPhoto = (nextId: string, transition: 'prev' | 'next') => {
+  const goToPhoto = async (nextId: string, transition: 'prev' | 'next') => {
     if (dirty) {
-      const ok = persist();
+      const ok = await persist();
       if (!ok) {
         Alert.alert('저장 실패', '편집 내용을 저장하지 못했습니다.');
         return;
@@ -197,8 +222,8 @@ export function DiaryRecordDecorateScreen({ navigation, route }: Props) {
     });
   };
 
-  const handleSave = () => {
-    const ok = persist();
+  const handleSave = async () => {
+    const ok = await persist();
     if (!ok) {
       Alert.alert('저장 실패', '편집 내용을 저장하지 못했습니다.');
       return;
@@ -222,9 +247,12 @@ export function DiaryRecordDecorateScreen({ navigation, route }: Props) {
       {
         text: '저장',
         onPress: () => {
-          if (persist()) {
-            navigation.goBack();
-          }
+          void (async () => {
+            const ok = await persist();
+            if (ok) {
+              navigation.goBack();
+            }
+          })();
         },
       },
     ]);

@@ -22,7 +22,8 @@ import { SEARCH_USERS } from '../../constants/users';
 import { useDiaries } from '../../context/DiaryContext';
 import { MainTabParamList, RootStackParamList } from '../../navigation/types';
 import { Diary } from '../../types/diary';
-import { getCoverBackgroundColor, getEffectiveCover, resolveCoverImageUri } from '../../utils/diaryCover';
+import { CoverThumb } from '../../components/diary/CoverThumb';
+import { getCoverBackgroundColor, getEffectiveCover } from '../../utils/diaryCover';
 import { colors } from '../../theme';
 
 type Props = CompositeScreenProps<
@@ -325,7 +326,6 @@ type DiaryCellProps = {
 
 function DiaryCell({ diary, onPress }: DiaryCellProps) {
   const cover = getEffectiveCover(diary);
-  const coverUri = resolveCoverImageUri(diary, cover);
   const title = cover.title?.trim() || diary.name;
   const photoCount = diary.photos?.length ?? 0;
 
@@ -340,15 +340,7 @@ function DiaryCell({ diary, onPress }: DiaryCellProps) {
         pressed && styles.pressed,
       ]}
     >
-      {coverUri ? (
-        <Image source={{ uri: coverUri }} style={styles.thumbImage} resizeMode="cover" />
-      ) : (
-        <View style={styles.thumbTitleWrap}>
-          <Text style={styles.thumbTitle} numberOfLines={3}>
-            {title}
-          </Text>
-        </View>
-      )}
+      <CoverThumb diary={diary} />
 
       {photoCount > 0 ? (
         <View style={styles.photoBadge}>

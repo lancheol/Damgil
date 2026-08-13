@@ -7,7 +7,6 @@ import {
   Alert,
   Dimensions,
   FlatList,
-  Image,
   Modal,
   Pressable,
   StyleSheet,
@@ -22,7 +21,8 @@ import { useAuth } from '../../context/AuthContext';
 import { useDiaries } from '../../context/DiaryContext';
 import { MainTabParamList, RootStackParamList } from '../../navigation/types';
 import { Diary } from '../../types/diary';
-import { getCoverBackgroundColor, getEffectiveCover, resolveCoverImageUri } from '../../utils/diaryCover';
+import { CoverThumb } from '../../components/diary/CoverThumb';
+import { getEffectiveCover } from '../../utils/diaryCover';
 import { colors, radii, spacing, typography } from '../../theme';
 
 type Props = CompositeScreenProps<
@@ -36,12 +36,13 @@ const CARD_WIDTH = (Dimensions.get('window').width - H_PADDING * 2 - GRID_GAP) /
 
 export function MyPageScreen({ navigation }: Props) {
   const { user } = useAuth();
-  const { diaries, deleteDiary } = useDiaries();
+  const { diaries, deleteDiary, updateDiaryVisibility } = useDiaries();
 
   const username = user?.username ?? 'traveler';
   const bio = user?.bio ?? '매주 새로운 곳을 기록하는 다이어리 ✈️';
 
   const [menuDiary, setMenuDiary] = useState<Diary | null>(null);
+  const [visibilityBusy, setVisibilityBusy] = useState(false);
 
   const coverDiaries = useMemo(
     () =>
@@ -70,18 +71,31 @@ export function MyPageScreen({ navigation }: Props) {
         text: '삭제',
         style: 'destructive',
         onPress: () => {
-          if (!deleteDiary(diary.id)) {
-            Alert.alert('삭제 실패', '다이어리를 삭제하지 못했어요.');
-          }
+          void deleteDiary(diary.id);
         },
       },
     ]);
   };
 
+  const handleToggleVisibility = async (diary: Diary) => {
+    if (visibilityBusy) {
+      return;
+    }
+    const isPublic = (diary.visibility ?? 'private') === 'public';
+    const next = isPublic ? 'private' : 'public';
+    setVisibilityBusy(true);
+    try {
+      const ok = await updateDiaryVisibility(diary.id, next);
+      if (ok) {
+        setMenuDiary(null);
+      }
+    } finally {
+      setVisibilityBusy(false);
+    }
+  };
+
   const renderDiaryCard = ({ item }: { item: Diary }) => {
     const cover = getEffectiveCover(item);
-    const coverUri = resolveCoverImageUri(item, cover);
-    const coverColor = getCoverBackgroundColor(cover);
     const likeCount = item.photos?.length ?? 0;
     const title = cover.title?.trim() || item.name;
     const isDraft = Boolean(item.coverDraft) && !item.cover;
@@ -93,16 +107,8 @@ export function MyPageScreen({ navigation }: Props) {
         onPress={() => openDiary(item)}
         style={styles.card}
       >
-        <View style={[styles.thumb, { backgroundColor: coverColor }]}>
-          {coverUri ? (
-            <Image source={{ uri: coverUri }} style={styles.thumbImage} resizeMode="cover" />
-          ) : (
-            <View style={styles.thumbTitleWrap}>
-              <Text style={styles.thumbTitle} numberOfLines={3}>
-                {title}
-              </Text>
-            </View>
-          )}
+        <View style={styles.thumb}>
+          <CoverThumb diary={item} />
           <View style={styles.badgeRow}>
             {isPrivate ? (
               <View style={styles.badge}>
@@ -198,6 +204,35 @@ export function MyPageScreen({ navigation }: Props) {
             <Text style={styles.menuTitle} numberOfLines={1}>
               {menuDiary ? getEffectiveCover(menuDiary).title?.trim() || menuDiary.name : ''}
             </Text>
+
+            <Pressable
+              accessibilityRole="button"
+              disabled={visibilityBusy}
+              onPress={() => {
+                if (menuDiary) {
+                  void handleToggleVisibility(menuDiary);
+                }
+              }}
+              style={({ pressed }) => [
+                styles.menuItem,
+                (pressed || visibilityBusy) && styles.pressed,
+              ]}
+            >
+              <Ionicons
+                name={
+                  (menuDiary?.visibility ?? 'private') === 'public'
+                    ? 'lock-closed-outline'
+                    : 'globe-outline'
+                }
+                size={18}
+                color={colors.ink}
+              />
+              <Text style={styles.menuItemText}>
+                {(menuDiary?.visibility ?? 'private') === 'public'
+                  ? '비공개로 바꾸기'
+                  : '공개로 바꾸기'}
+              </Text>
+            </Pressable>
 
             <Pressable
               accessibilityRole="button"
@@ -321,22 +356,6 @@ const styles = StyleSheet.create({
     borderRadius: 12,
     backgroundColor: '#F3F4F6',
     overflow: 'hidden',
-  },
-  thumbImage: {
-    width: '100%',
-    height: '100%',
-  },
-  thumbTitleWrap: {
-    flex: 1,
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingHorizontal: 10,
-  },
-  thumbTitle: {
-    fontSize: 13,
-    fontWeight: '700',
-    color: colors.white,
-    textAlign: 'center',
   },
   badgeRow: {
     position: 'absolute',

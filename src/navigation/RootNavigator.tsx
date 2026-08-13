@@ -9,6 +9,7 @@ import { AICourseResultScreen } from '../screens/main/AICourseResultScreen';
 import { CreateDiaryScreen } from '../screens/main/CreateDiaryScreen';
 import { DiaryCameraScreen } from '../screens/main/DiaryCameraScreen';
 import { DiaryCoverEditScreen } from '../screens/main/DiaryCoverEditScreen';
+import { DiaryDailyCourseMapScreen } from '../screens/main/DiaryDailyCourseMapScreen';
 import { DiaryEditScreen } from '../screens/main/DiaryEditScreen';
 import { DiaryPhotoEntryScreen } from '../screens/main/DiaryPhotoEntryScreen';
 import { DiaryPhotoGalleryScreen } from '../screens/main/DiaryPhotoGalleryScreen';
@@ -150,6 +151,13 @@ export function RootNavigator() {
               component={DiaryCoverEditScreen}
               options={{
                 animation: 'slide_from_bottom',
+              }}
+            />
+            <Stack.Screen
+              name="DiaryDailyCourseMap"
+              component={DiaryDailyCourseMapScreen}
+              options={{
+                animation: 'slide_from_right',
               }}
             />
             <Stack.Screen

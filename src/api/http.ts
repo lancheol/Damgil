@@ -5,6 +5,7 @@ type RequestOptions = {
   method?: 'GET' | 'POST' | 'PATCH' | 'PUT' | 'DELETE';
   body?: unknown;
   accessToken?: string | null;
+  headers?: Record<string, string>;
 };
 
 function resolveUrl(path: string): string {
@@ -36,6 +37,7 @@ function parseErrorBody(payload: unknown): ApiErrorBody | null {
 export async function apiRequest<T>(path: string, options: RequestOptions = {}): Promise<T> {
   const headers: Record<string, string> = {
     Accept: 'application/json',
+    ...(options.headers ?? {}),
   };
   if (options.body !== undefined) {
     headers['Content-Type'] = 'application/json';

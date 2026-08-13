@@ -1,81 +1,99 @@
+import { getPlaceDetail, searchPlaces } from '../api/places';
+import { TourApiPlaceItem } from '../api/types';
+
 export type MapLocation = {
   name: string;
   latitude: number;
   longitude: number;
+  /** TourAPI / PlaceCache contentId — 위치 확정 API에 필요 */
+  contentId?: string;
 };
 
-const BASE_LAT = 34.88055;
-const BASE_LNG = 128.62115;
-
-/** API 연동 전 샘플 장소 목록 */
-const STUB_PLACE_NAMES = [
-  '해운대 해수욕장',
-  '광안리 해수욕장',
-  '센텀시티',
-  '자갈치시장',
-  '국제시장',
-  '남포동',
-  '부산역',
-  '서면',
-  '전포 카페거리',
-  '감천문화마을',
-  '태종대',
-  '용두산공원',
-  '고현항 근린공원 물놀이장',
-  '거제 바람의 언덕',
-  '외도 보타니아',
-  '경복궁',
-  '남산타워',
-  '홍대입구',
-  '강남역',
-  '여의도 한강공원',
-] as const;
-
-/** 장소명마다 조금씩 다른 좌표를 만들어 GPS 그룹이 분리되도록 함 (API 연동 전) */
-function stubCoordsForName(name: string): { latitude: number; longitude: number } {
-  let hash = 0;
-  for (let i = 0; i < name.length; i += 1) {
-    hash = (hash * 31 + name.charCodeAt(i)) | 0;
+function parseCoord(value: string | number | undefined | null): number | null {
+  if (typeof value === 'number' && Number.isFinite(value)) {
+    return value;
   }
-  const dLat = ((hash % 2000) - 1000) / 50000;
-  const dLng = (((hash >> 9) % 2000) - 1000) / 50000;
+  if (typeof value === 'string' && value.trim()) {
+    const n = Number(value);
+    return Number.isFinite(n) ? n : null;
+  }
+  return null;
+}
+
+function toMapLocation(item: TourApiPlaceItem): MapLocation | null {
+  const contentId = String(item.contentid ?? item.contentId ?? '').trim();
+  const title = String(item.title ?? '').trim();
+  const latitude = parseCoord(item.mapy);
+  const longitude = parseCoord(item.mapx);
+  if (!contentId || !title || latitude == null || longitude == null) {
+    return null;
+  }
   return {
-    latitude: BASE_LAT + dLat,
-    longitude: BASE_LNG + dLng,
+    name: title,
+    latitude,
+    longitude,
+    contentId,
   };
 }
 
-function toLocation(name: string): MapLocation {
-  return {
-    name,
-    ...stubCoordsForName(name),
-  };
-}
-
-/** @deprecated 단일 결과 — searchTravelPlaces 사용 */
-export async function searchTravelPlace(query: string): Promise<MapLocation> {
-  const results = await searchTravelPlaces(query);
-  return results[0] ?? toLocation(query.trim() || '고현항 근린공원 물놀이장');
-}
-
-/** API 연동 전 임시 다중 검색 결과 */
+/** 키워드로 여행 장소 검색 (TourAPI place_cache) */
 export async function searchTravelPlaces(query: string): Promise<MapLocation[]> {
   const trimmed = query.trim();
   if (!trimmed) {
     return [];
   }
 
-  await new Promise((resolve) => {
-    setTimeout(resolve, 220);
-  });
+  try {
+    const result = await searchPlaces(trimmed, { rows: 8 });
+    const mapped = (result.items ?? [])
+      .map(toMapLocation)
+      .filter((item): item is MapLocation => item != null);
+    return mapped.slice(0, 8);
+  } catch {
+    return [];
+  }
+}
 
-  const lower = trimmed.toLowerCase();
-  const matched = STUB_PLACE_NAMES.filter((name) => name.toLowerCase().includes(lower)).map(
-    toLocation,
-  );
+/** 장소 상세 common.mapy/mapx → 좌표 */
+export async function resolvePlaceCoordsByContentId(
+  contentId: string,
+): Promise<MapLocation | null> {
+  const id = contentId.trim();
+  if (!id) {
+    return null;
+  }
+  try {
+    const detail = await getPlaceDetail(id);
+    const common = detail.common ?? {};
+    const latitude = parseCoord(
+      (common.mapy as string | number | undefined) ??
+        (common.mapY as string | number | undefined),
+    );
+    const longitude = parseCoord(
+      (common.mapx as string | number | undefined) ??
+        (common.mapX as string | number | undefined),
+    );
+    const title = String(common.title ?? '').trim();
+    if (latitude == null || longitude == null) {
+      return null;
+    }
+    return {
+      name: title || '장소',
+      latitude,
+      longitude,
+      contentId: id,
+    };
+  } catch {
+    return null;
+  }
+}
 
-  const exactExists = matched.some((item) => item.name === trimmed);
-  const results = exactExists ? matched : [toLocation(trimmed), ...matched];
-
-  return results.slice(0, 8);
+/** 이름 정확 일치 우선으로 TourAPI 좌표 조회 */
+export async function resolvePlaceCoordsByName(name: string): Promise<MapLocation | null> {
+  const trimmed = name.trim();
+  if (!trimmed || trimmed === '장소' || trimmed === '장소 미지정') {
+    return null;
+  }
+  const results = await searchTravelPlaces(trimmed);
+  return results.find((item) => item.name === trimmed) ?? null;
 }

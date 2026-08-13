@@ -54,7 +54,11 @@ import {
   DEFAULT_COVER_COLOR,
   DEFAULT_COVER_TITLE_X,
   DEFAULT_COVER_TITLE_Y,
+  DEFAULT_COVER_TITLE_SCALE,
+  DEFAULT_COVER_TITLE_ROTATION,
   clampCoverTitleAxis,
+  clampCoverTitleScale,
+  clampCoverTitleRotation,
   createEmptyCover,
   getCoverBackgroundColor,
   getEffectiveCover,
@@ -94,6 +98,12 @@ export function DiaryCoverEditScreen({ navigation, route }: Props) {
   );
   const [titleY, setTitleY] = useState(
     clampCoverTitleAxis(initial.titleY, DEFAULT_COVER_TITLE_Y),
+  );
+  const [titleScale, setTitleScale] = useState(
+    clampCoverTitleScale(initial.titleScale ?? DEFAULT_COVER_TITLE_SCALE),
+  );
+  const [titleRotation, setTitleRotation] = useState(
+    clampCoverTitleRotation(initial.titleRotation ?? DEFAULT_COVER_TITLE_ROTATION),
   );
   const [backgroundColor, setBackgroundColor] = useState(
     getCoverBackgroundColor(initial) || DEFAULT_COVER_COLOR,
@@ -181,13 +191,15 @@ export function DiaryCoverEditScreen({ navigation, route }: Props) {
       fontId,
       titleX,
       titleY,
+      titleScale,
+      titleRotation,
       stickers,
       photos,
       texts,
       backgroundColor,
       updatedAt: new Date().toISOString(),
     };
-  }, [title, fontId, titleX, titleY, stickers, photos, texts, backgroundColor, diary?.name]);
+  }, [title, fontId, titleX, titleY, titleScale, titleRotation, stickers, photos, texts, backgroundColor, diary?.name]);
 
   // 여행 종료 직후에는 돌아갈 곳이 카메라 플로우라 마이페이지로 보낸다
   const leaveToMyPage = () => {
@@ -199,11 +211,11 @@ export function DiaryCoverEditScreen({ navigation, route }: Props) {
   };
 
   const persistCover = useCallback(
-    (mode: 'save' | 'draft') => {
+    async (mode: 'save' | 'draft') => {
       if (!diary) {
         return false;
       }
-      const ok = saveDiaryCover({
+      const ok = await saveDiaryCover({
         diaryId,
         cover: buildCover(),
         mode,
@@ -217,8 +229,8 @@ export function DiaryCoverEditScreen({ navigation, route }: Props) {
     [diary, diaryId, buildCover, saveDiaryCover],
   );
 
-  const handleNext = () => {
-    if (!persistCover('save')) {
+  const handleNext = async () => {
+    if (!(await persistCover('save'))) {
       Alert.alert('저장 실패', '표지를 저장하지 못했습니다.');
       return;
     }
@@ -252,11 +264,13 @@ export function DiaryCoverEditScreen({ navigation, route }: Props) {
         {
           text: '임시 저장',
           onPress: () => {
-            if (!persistCover('draft')) {
-              Alert.alert('저장 실패', '임시 저장하지 못했어요.');
-              return;
-            }
-            leaveToMyPage();
+            void (async () => {
+              if (!(await persistCover('draft'))) {
+                Alert.alert('저장 실패', '임시 저장하지 못했어요.');
+                return;
+              }
+              leaveToMyPage();
+            })();
           },
         },
       ],
@@ -344,7 +358,7 @@ export function DiaryCoverEditScreen({ navigation, route }: Props) {
     }
 
     const asset = result.assets[0];
-    const saved = addPhotoToDiary({
+    const saved = await addPhotoToDiary({
       diaryId,
       uri: asset.uri,
       mediaType: 'photo',
@@ -518,7 +532,9 @@ export function DiaryCoverEditScreen({ navigation, route }: Props) {
         <Text style={styles.screenTitle}>표지 편집</Text>
         <Pressable
           accessibilityRole="button"
-          onPress={handleNext}
+          onPress={() => {
+            void handleNext();
+          }}
           style={({ pressed }) => [styles.nextChip, pressed && styles.pressed]}
         >
           <Text style={styles.nextChipText}>다음</Text>
@@ -541,10 +557,12 @@ export function DiaryCoverEditScreen({ navigation, route }: Props) {
                 fill
                 style={styles.coverCanvas}
                 backgroundColor={backgroundColor}
-                title={title.trim() || diary.name}
+                title={title}
                 fontId={fontId}
                 titleX={titleX}
                 titleY={titleY}
+                titleScale={titleScale}
+                titleRotation={titleRotation}
                 photos={photos}
                 photoById={photoById}
                 stickers={stickers}
@@ -563,6 +581,14 @@ export function DiaryCoverEditScreen({ navigation, route }: Props) {
                 onMoveTitle={(x, y) => {
                   setTitleX(x);
                   setTitleY(y);
+                  markDirty();
+                }}
+                onScaleTitle={(scale) => {
+                  setTitleScale(clampCoverTitleScale(scale));
+                  markDirty();
+                }}
+                onRotateTitle={(rotation) => {
+                  setTitleRotation(clampCoverTitleRotation(rotation));
                   markDirty();
                 }}
                 onSelectPhoto={(id) => {

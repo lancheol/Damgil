@@ -57,11 +57,10 @@ export function HomeScreen({ navigation }: Props) {
           text: '삭제',
           style: 'destructive',
           onPress: () => {
-            setActionVisible(false);
-            const ok = deleteDiary(diaryId);
-            if (!ok) {
-              Alert.alert('삭제 실패', '다이어리를 삭제하지 못했어요.');
-            }
+            void (async () => {
+              setActionVisible(false);
+              await deleteDiary(diaryId);
+            })();
           },
         },
       ],
@@ -85,13 +84,14 @@ export function HomeScreen({ navigation }: Props) {
           text: '종료',
           style: 'destructive',
           onPress: () => {
-            const ok = endDiary(diaryId);
-            setActionVisible(false);
-            if (!ok) {
-              Alert.alert('종료 실패', '여행을 종료하지 못했습니다.');
-              return;
-            }
-            navigation.navigate('DiaryCoverEdit', { diaryId, fromTripEnd: true });
+            void (async () => {
+              setActionVisible(false);
+              const ok = await endDiary(diaryId);
+              if (!ok) {
+                return;
+              }
+              navigation.navigate('DiaryCoverEdit', { diaryId, fromTripEnd: true });
+            })();
           },
         },
       ],
@@ -104,7 +104,7 @@ export function HomeScreen({ navigation }: Props) {
       <View style={styles.body}>
         {activeDiary ? (
           <ActiveDiaryGuideCard
-            diaryName={activeDiary.name}
+            diary={activeDiary}
             onPress={handleDiaryPress}
             onPressDelete={handleDeleteDiary}
           />

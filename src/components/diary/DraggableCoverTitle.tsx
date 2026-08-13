@@ -11,6 +11,8 @@ type Props = {
   color: string;
   x: number;
   y: number;
+  scale?: number;
+  rotation?: number;
   selected: boolean;
   editable: boolean;
   layoutRef: MutableRefObject<{ width: number; height: number }>;
@@ -24,6 +26,8 @@ export function DraggableCoverTitle({
   color,
   x,
   y,
+  scale = 1,
+  rotation = 0,
   selected,
   editable,
   layoutRef,
@@ -85,7 +89,13 @@ export function DraggableCoverTitle({
         },
       ]}
     >
-      <View style={[styles.visual, selected && editable ? styles.selected : null]}>
+      <View
+        style={[
+          styles.visual,
+          selected && editable ? styles.selected : null,
+          { transform: [{ scale }, { rotate: `${rotation}deg` }] },
+        ]}
+      >
         <Text style={[styles.title, getCoverFontStyle(fontId), { color }]} numberOfLines={4}>
           {title || '제목 없음'}
         </Text>

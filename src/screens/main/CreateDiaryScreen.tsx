@@ -1,6 +1,7 @@
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { useMemo, useState } from 'react';
 import {
+  ActivityIndicator,
   KeyboardAvoidingView,
   Platform,
   Pressable,
@@ -16,6 +17,7 @@ import { DismissKeyboardView } from '../../components/common/DismissKeyboardView
 import { useDiaries } from '../../context/DiaryContext';
 import { RootStackParamList } from '../../navigation/types';
 import { colors, radii, spacing, typography } from '../../theme';
+import { mapCreateTripError } from '../../utils/tripErrors';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'CreateDiary'>;
 
@@ -25,24 +27,34 @@ export function CreateDiaryScreen({ navigation }: Props) {
   const [place, setPlace] = useState('');
   const [nameError, setNameError] = useState<string | undefined>();
   const [placeError, setPlaceError] = useState<string | undefined>();
+  const [submitting, setSubmitting] = useState(false);
+  const [formError, setFormError] = useState<string | null>(null);
 
   const canSubmit = useMemo(
-    () => name.trim().length > 0 && place.trim().length > 0,
-    [name, place],
+    () => name.trim().length > 0 && place.trim().length > 0 && !submitting,
+    [name, place, submitting],
   );
 
-  const handleSubmit = () => {
+  const handleSubmit = async () => {
     const nextNameError = name.trim() ? undefined : '다이어리 이름을 입력해 주세요.';
     const nextPlaceError = place.trim() ? undefined : '여행지를 입력해 주세요.';
     setNameError(nextNameError);
     setPlaceError(nextPlaceError);
+    setFormError(null);
 
     if (nextNameError || nextPlaceError) {
       return;
     }
 
-    createDiary({ name, place });
-    navigation.goBack();
+    try {
+      setSubmitting(true);
+      await createDiary({ name, place });
+      navigation.goBack();
+    } catch (error) {
+      setFormError(mapCreateTripError(error));
+    } finally {
+      setSubmitting(false);
+    }
   };
 
   return (
@@ -94,6 +106,7 @@ export function CreateDiaryScreen({ navigation }: Props) {
                 onSubmitEditing={handleSubmit}
               />
               {placeError ? <Text style={styles.error}>{placeError}</Text> : null}
+              {formError ? <Text style={styles.error}>{formError}</Text> : null}
 
               {/* 하단 사용 방법 (a)~ 문구는 이후에 채움 */}
               <View style={styles.guideSlot} />
@@ -110,7 +123,11 @@ export function CreateDiaryScreen({ navigation }: Props) {
                 pressed && canSubmit && styles.startBtnPressed,
               ]}
             >
-              <Text style={styles.startText}>Travel Start</Text>
+              {submitting ? (
+                <ActivityIndicator color={colors.white} />
+              ) : (
+                <Text style={styles.startText}>Travel Start</Text>
+              )}
             </Pressable>
           </View>
         </DismissKeyboardView>

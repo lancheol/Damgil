@@ -33,11 +33,19 @@ export type RootStackParamList = {
   AICourseResult: { course: AiCourse };
   AICourseMap: { course: AiCourse };
   DiaryCamera: { diaryId: string };
-  DiaryPhotoEntry: { diaryId: string; photoUri: string; mediaType?: 'photo' | 'video' };
+  DiaryPhotoEntry: {
+    diaryId: string;
+    photoUri: string;
+    mediaType?: 'photo' | 'video';
+    mediaWidth?: number;
+    mediaHeight?: number;
+    captureLandscape?: boolean;
+  };
   DiaryPhotoGallery: { diaryId: string };
   DiaryEdit: { diaryId: string; placeId?: string };
   DiaryPlacePick: { diaryId: string };
   DiaryCoverEdit: { diaryId: string; fromTripEnd?: boolean };
+  DiaryDailyCourseMap: { diaryId: string; dayNumber?: number };
   DiaryRecordDetail: { diaryId: string; photoId: string };
   DiaryRecordDecorate: {
     diaryId: string;

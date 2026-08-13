@@ -1,14 +1,9 @@
-import { Image, Pressable, StyleSheet, Text, View } from 'react-native';
+import { Pressable, StyleSheet, View } from 'react-native';
 
+import { CoverThumb } from '../diary/CoverThumb';
 import { Diary } from '../../types/diary';
-import {
-  getCoverBackgroundColor,
-  getCoverFontStyle,
-  getCoverTitleColor,
-  getEffectiveCover,
-  resolveCoverImageUri,
-} from '../../utils/diaryCover';
-import { colors, radii, spacing, typography } from '../../theme';
+import { getCoverBackgroundColor, getEffectiveCover } from '../../utils/diaryCover';
+import { colors, radii, spacing } from '../../theme';
 
 type DiaryBookCardProps = {
   diary: Diary;
@@ -17,14 +12,8 @@ type DiaryBookCardProps = {
 
 export function DiaryBookCard({ diary, onPress }: DiaryBookCardProps) {
   const cover = getEffectiveCover(diary);
-  const coverUri = resolveCoverImageUri(diary, cover);
   const title = cover.title?.trim() || diary.name;
   const coverBg = getCoverBackgroundColor(cover);
-  const titleColor = getCoverTitleColor(coverBg);
-  const muted = titleColor === '#FFFFFF' ? '#9A9A9A' : '#6B6B6B';
-  const soft = titleColor === '#FFFFFF' ? '#B5B5B5' : '#666666';
-  const line = titleColor === '#FFFFFF' ? '#2E2E2E' : '#D4D4D4';
-  const divider = titleColor === '#FFFFFF' ? '#3A3A3A' : '#C4C4C4';
 
   return (
     <Pressable
@@ -40,52 +29,7 @@ export function DiaryBookCard({ diary, onPress }: DiaryBookCardProps) {
       </View>
 
       <View style={[styles.cover, { backgroundColor: coverBg }]}>
-        {coverUri ? (
-          <Image source={{ uri: coverUri }} style={styles.coverImage} resizeMode="cover" />
-        ) : null}
-        {coverUri ? <View style={styles.coverDim} /> : null}
-
-        <View style={[styles.cornerMark, { borderColor: muted }]} />
-        <Text style={[styles.brand, { color: muted }]}>담길 DIARY</Text>
-        <View style={[styles.divider, { backgroundColor: divider }]} />
-        <Text
-          style={[styles.title, getCoverFontStyle(cover.fontId), { color: titleColor }]}
-          numberOfLines={3}
-        >
-          {title}
-        </Text>
-        <Text style={[styles.place, { color: soft }]} numberOfLines={2}>
-          {diary.place}
-        </Text>
-
-        {cover.stickers.slice(0, 6).map((sticker) => (
-          <Text
-            key={sticker.id}
-            style={[
-              styles.coverSticker,
-              {
-                left: `${sticker.x * 100}%` as unknown as number,
-                top: `${sticker.y * 100}%` as unknown as number,
-                transform: [
-                  { translateX: -10 },
-                  { translateY: -10 },
-                  { scale: Math.min(sticker.scale, 1.2) },
-                  { rotate: `${sticker.rotation}deg` },
-                ],
-              },
-            ]}
-          >
-            {sticker.emoji}
-          </Text>
-        ))}
-
-        <View style={styles.footer}>
-          <Text style={[styles.footerLabel, { color: muted }]}>TRAVEL LOG</Text>
-          <Text style={[styles.photoCount, { color: soft }]}>
-            기록 {diary.photos?.length ?? 0}장
-          </Text>
-          <View style={[styles.footerLine, { backgroundColor: line }]} />
-        </View>
+        <CoverThumb diary={diary} />
       </View>
 
       <View pointerEvents="none" style={styles.pageEdge}>
@@ -134,82 +78,7 @@ const styles = StyleSheet.create({
   },
   cover: {
     flex: 1,
-    paddingHorizontal: spacing.xl,
-    paddingTop: spacing.xxl,
-    paddingBottom: spacing.xl,
-    paddingRight: spacing.xxxl,
     overflow: 'hidden',
-  },
-  coverImage: {
-    ...StyleSheet.absoluteFillObject,
-    opacity: 0.45,
-  },
-  coverDim: {
-    ...StyleSheet.absoluteFillObject,
-    backgroundColor: 'rgba(0,0,0,0.35)',
-  },
-  coverSticker: {
-    position: 'absolute',
-    fontSize: 20,
-    zIndex: 2,
-  },
-  cornerMark: {
-    position: 'absolute',
-    top: spacing.lg,
-    right: spacing.xxl,
-    width: 18,
-    height: 18,
-    borderTopWidth: 1.5,
-    borderRightWidth: 1.5,
-    borderColor: '#5A5A5A',
-    zIndex: 1,
-  },
-  brand: {
-    ...typography.monoBody,
-    color: '#9A9A9A',
-    letterSpacing: 1.2,
-    marginBottom: spacing.lg,
-    zIndex: 1,
-  },
-  divider: {
-    width: 40,
-    height: 2,
-    backgroundColor: '#3A3A3A',
-    marginBottom: spacing.xl,
-    zIndex: 1,
-  },
-  title: {
-    fontSize: 28,
-    fontWeight: '700',
-    color: colors.white,
-    letterSpacing: -0.6,
-    marginBottom: spacing.md,
-    zIndex: 1,
-  },
-  place: {
-    ...typography.body,
-    color: '#B5B5B5',
-    zIndex: 1,
-  },
-  footer: {
-    marginTop: 'auto',
-    gap: spacing.sm,
-    zIndex: 1,
-  },
-  footerLabel: {
-    ...typography.monoBody,
-    color: '#7A7A7A',
-    letterSpacing: 1.4,
-  },
-  photoCount: {
-    ...typography.body,
-    color: '#B5B5B5',
-    marginTop: 4,
-  },
-  footerLine: {
-    height: 1,
-    backgroundColor: '#2E2E2E',
-    marginTop: spacing.sm,
   },
   pageEdge: {
     position: 'absolute',

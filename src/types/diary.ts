@@ -33,6 +33,9 @@ export type DiaryCover = {
   /** 표지 제목 위치 (0~1), 기본 중앙 */
   titleX?: number;
   titleY?: number;
+  /** 표지 제목 크기·회전 (스티커와 동일 제스처) */
+  titleScale?: number;
+  titleRotation?: number;
   stickers: DecorSticker[];
   /** 표지 위 자유 배치 사진 레이어 */
   photos?: DecorPhotoLayer[];
@@ -71,6 +74,8 @@ export type DiaryPhoto = {
   note?: string;
   latitude: number;
   longitude: number;
+  /** TourAPI contentId — 확정 장소 */
+  placeContentId?: string | null;
   createdAt: string;
   decoration?: PhotoDecoration | null;
 };
@@ -103,6 +108,7 @@ export type DiaryPlaceSelection = {
   placeName: string;
   photoIds: string[];
   representativePhotoId: string;
+  placeContentId?: string | null;
   pageDecoration?: PlacePageDecoration | null;
 };
 
@@ -112,6 +118,8 @@ export type Diary = {
   place: string;
   createdAt: string;
   endedAt?: string | null;
+  /** 서버 여행 상태 — recording(촬영) | editing(꾸미기) | completed(완료) */
+  status?: 'recording' | 'editing' | 'completed';
   photos: DiaryPhoto[];
   cover?: DiaryCover | null;
   coverDraft?: DiaryCover | null;
@@ -146,6 +154,10 @@ export type AddDiaryPhotoInput = {
   note?: string;
   latitude: number;
   longitude: number;
+  /** TourAPI contentId — 있으면 위치 확정 API 호출 */
+  placeContentId?: string | null;
+  /** 이미 POST /items 로 만든 서버 기록 id */
+  serverItemId?: string | null;
   /** 갤러리에서 가져올 때 — 여행 종료 후에도 추가 허용 */
   allowAfterEnd?: boolean;
 };

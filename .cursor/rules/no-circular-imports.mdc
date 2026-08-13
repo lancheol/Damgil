@@ -1,0 +1,13 @@
+---
+description: Prevent circular imports that crash Metro/Hermes at render time
+alwaysApply: true
+---
+
+# Module boundaries (prevent render crashes)
+
+Utils (`src/utils/`) must **not** import from `src/components/` or screens. That creates circular modules: Metro/Hermes then exports `undefined` (`Property 'X' doesn't exist`) or `foo.name` on a missing object.
+
+- Pure helpers (clamp, scale, color, mapping) live in `src/utils/`
+- Components import utils — never the reverse
+- Do not both **import** and **redeclare** the same function in one file (Babel: `Duplicate declaration`)
+- Before finishing UI changes, run `npx tsc --noEmit` and fix new errors

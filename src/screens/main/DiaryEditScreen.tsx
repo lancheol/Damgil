@@ -64,9 +64,13 @@ function getFontInputStyle(fontId: DecorFontId) {
 export function DiaryEditScreen({ navigation, route }: Props) {
   const { diaryId } = route.params;
   const insets = useSafeAreaInsets();
-  const { getDiaryById, savePlaceSelections, savePlacePageDecoration, addPhotoToDiary } =
+  const { getDiaryById, savePlaceSelections, savePlacePageDecoration, addPhotoToDiary, syncDiaryTimeline, completeDiary, removePhotosFromDiary } =
     useDiaries();
   const diary = getDiaryById(diaryId);
+
+  useEffect(() => {
+    void syncDiaryTimeline(diaryId);
+  }, [diaryId, syncDiaryTimeline]);
 
   useEffect(() => {
     if (!diary || !diary.endedAt) {
@@ -366,7 +370,7 @@ export function DiaryEditScreen({ navigation, route }: Props) {
     }
 
     const asset = result.assets[0];
-    const saved = addPhotoToDiary({
+    const saved = await addPhotoToDiary({
       diaryId,
       uri: asset.uri,
       mediaType: 'photo',
@@ -464,21 +468,82 @@ export function DiaryEditScreen({ navigation, route }: Props) {
     id: string,
     shouldDelete: boolean,
   ) => {
-    if (shouldDelete) {
-      if (type === 'photo') {
-        setPhotos((prev) => prev.filter((item) => item.id !== id));
-        setSelectedPhotoId(null);
-      } else if (type === 'sticker') {
-        setStickers((prev) => prev.filter((item) => item.id !== id));
-        setSelectedStickerId(null);
-      } else {
-        setTexts((prev) => prev.filter((item) => item.id !== id));
-        setSelectedTextId(null);
-      }
-      markDirty();
+    if (!shouldDelete) {
+      setTrashHotState(false);
+      setDraggingLayer(false);
+      return;
     }
-    setTrashHotState(false);
-    setDraggingLayer(false);
+
+    if (type === 'sticker') {
+      setStickers((prev) => prev.filter((item) => item.id !== id));
+      setSelectedStickerId(null);
+      markDirty();
+      setTrashHotState(false);
+      setDraggingLayer(false);
+      return;
+    }
+
+    if (type === 'text') {
+      setTexts((prev) => prev.filter((item) => item.id !== id));
+      setSelectedTextId(null);
+      markDirty();
+      setTrashHotState(false);
+      setDraggingLayer(false);
+      return;
+    }
+
+    const layer = photosRef.current.find((item) => item.id === id);
+    const photoId = layer?.photoId;
+    const isRepresentative =
+      Boolean(photoId) && activePlaceRef.current?.representativePhotoId === photoId;
+
+    const removeLayerOnly = () => {
+      setPhotos((prev) => prev.filter((item) => item.id !== id));
+      setSelectedPhotoId(null);
+      markDirty();
+      setTrashHotState(false);
+      setDraggingLayer(false);
+    };
+
+    if (!photoId || !isRepresentative) {
+      removeLayerOnly();
+      return;
+    }
+
+    Alert.alert(
+      '기록 삭제',
+      '대표 사진을 지우면 이번 기록은 사라져요. 그래도 지울까요?',
+      [
+        {
+          text: '아니오',
+          style: 'cancel',
+          onPress: () => {
+            setTrashHotState(false);
+            setDraggingLayer(false);
+          },
+        },
+        {
+          text: '네',
+          style: 'destructive',
+          onPress: () => {
+            void (async () => {
+              const ok = await removePhotosFromDiary(diaryId, [photoId]);
+              if (!ok) {
+                setTrashHotState(false);
+                setDraggingLayer(false);
+                return;
+              }
+              setPhotos((prev) => prev.filter((item) => item.photoId !== photoId));
+              setSelectedPhotoId(null);
+              dirtyRef.current = false;
+              setDirty(false);
+              setTrashHotState(false);
+              setDraggingLayer(false);
+            })();
+          },
+        },
+      ],
+    );
   };
 
   const handleDragEnd = (
@@ -505,11 +570,14 @@ export function DiaryEditScreen({ navigation, route }: Props) {
   };
 
   const handleDone = () => {
-    if (dirtyRef.current && !persistCurrent()) {
-      Alert.alert('저장 실패', '페이지를 저장하지 못했어요.');
-      return;
-    }
-    navigation.goBack();
+    void (async () => {
+      if (dirtyRef.current && !persistCurrent()) {
+        Alert.alert('저장 실패', '페이지를 저장하지 못했어요.');
+        return;
+      }
+      await completeDiary(diaryId);
+      navigation.goBack();
+    })();
   };
 
   const handleEditCover = () => {
@@ -721,6 +789,20 @@ export function DiaryEditScreen({ navigation, route }: Props) {
               ) : null}
 
               <View style={styles.timeline}>
+                <Pressable
+                  accessibilityRole="button"
+                  accessibilityLabel="일자별 경로 지도"
+                  onPress={() =>
+                    navigation.navigate('DiaryDailyCourseMap', {
+                      diaryId,
+                      dayNumber: activeDay?.dayNumber,
+                    })
+                  }
+                  style={({ pressed }) => [styles.mapFab, pressed && styles.pressed]}
+                  hitSlop={8}
+                >
+                  <Ionicons name="map-outline" size={16} color={colors.ink} />
+                </Pressable>
                 <View style={styles.timelineLine} />
                 <ScrollView
                   horizontal
@@ -1050,10 +1132,24 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     zIndex: 5,
   },
+  mapFab: {
+    position: 'absolute',
+    right: 6,
+    top: -2,
+    zIndex: 7,
+    width: 28,
+    height: 28,
+    borderRadius: 14,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'rgba(255,255,255,0.92)',
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: 'rgba(0,0,0,0.12)',
+  },
   timelineLine: {
     position: 'absolute',
     left: 8,
-    right: 8,
+    right: 40,
     top: '50%',
     marginTop: -1,
     height: 2,
@@ -1064,6 +1160,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: 28,
     paddingHorizontal: 8,
+    paddingRight: 40,
   },
   markerBtn: {
     width: 28,

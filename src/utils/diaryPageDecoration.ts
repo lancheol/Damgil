@@ -30,7 +30,7 @@ export function normalizePlacePageDecoration(
   decoration: PlacePageDecoration | null | undefined,
   fallbackPhotoId?: string | null,
 ): PlacePageDecoration {
-  const photos = Array.isArray(decoration?.photos)
+  const photos: DecorPhotoLayer[] = Array.isArray(decoration?.photos)
     ? decoration!.photos.map((item) => ({
         id: item.id || createPhotoLayerId(),
         photoId: item.photoId,

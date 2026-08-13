@@ -13,9 +13,12 @@ import {
   DiaryPhoto,
 } from '../../types/diary';
 import {
+  COVER_TITLE_LAYER_ID,
   DEFAULT_COVER_COLOR,
   DEFAULT_COVER_TITLE_X,
   DEFAULT_COVER_TITLE_Y,
+  DEFAULT_COVER_TITLE_SCALE,
+  DEFAULT_COVER_TITLE_ROTATION,
   getCoverTitleColor,
 } from '../../utils/diaryCover';
 
@@ -25,6 +28,8 @@ type CoverCanvasProps = {
   fontId: CoverFontId;
   titleX?: number;
   titleY?: number;
+  titleScale?: number;
+  titleRotation?: number;
   photos: DecorPhotoLayer[];
   photoById: Record<string, DiaryPhoto | undefined>;
   stickers: DecorSticker[];
@@ -43,6 +48,8 @@ type CoverCanvasProps = {
   onSelectText?: (id: string) => void;
   onSelectTitle?: () => void;
   onMoveTitle?: (x: number, y: number) => void;
+  onScaleTitle?: (scale: number) => void;
+  onRotateTitle?: (rotation: number) => void;
   onEditText?: (id: string) => void;
   onMovePhoto?: (id: string, x: number, y: number) => void;
   onScalePhoto?: (id: string, scale: number) => void;
@@ -66,10 +73,12 @@ export function CoverCanvas({
   fontId,
   titleX = DEFAULT_COVER_TITLE_X,
   titleY = DEFAULT_COVER_TITLE_Y,
-  photos,
+  titleScale = DEFAULT_COVER_TITLE_SCALE,
+  titleRotation = DEFAULT_COVER_TITLE_ROTATION,
+  photos = [],
   photoById,
-  stickers,
-  texts,
+  stickers = [],
+  texts = [],
   selectedPhotoId,
   selectedStickerId,
   selectedTextId,
@@ -83,6 +92,8 @@ export function CoverCanvas({
   onSelectText,
   onSelectTitle,
   onMoveTitle,
+  onScaleTitle,
+  onRotateTitle,
   onEditText,
   onMovePhoto,
   onScalePhoto,
@@ -108,12 +119,25 @@ export function CoverCanvas({
   textsRef.current = texts;
 
   const titleColor = getCoverTitleColor(backgroundColor);
-  const selectedLayerId = selectedTextId ?? selectedStickerId ?? selectedPhotoId;
+  const titleScaleRef = useRef(titleScale);
+  const titleRotationRef = useRef(titleRotation);
+  titleScaleRef.current = titleScale;
+  titleRotationRef.current = titleRotation;
+
+  const selectedLayerId = selectedTitle
+    ? COVER_TITLE_LAYER_ID
+    : selectedTextId ?? selectedStickerId ?? selectedPhotoId;
 
   const pinchHandlers = useCanvasPinchHandlers({
     enabled: editable,
     selectedStickerId: selectedLayerId,
     getSelectedTransform: () => {
+      if (selectedLayerId === COVER_TITLE_LAYER_ID) {
+        return {
+          scale: titleScaleRef.current,
+          rotation: titleRotationRef.current,
+        };
+      }
       if (selectedTextId) {
         const text = textsRef.current.find((item) => item.id === selectedTextId);
         return { scale: text?.scale ?? 1, rotation: text?.rotation ?? 0 };
@@ -126,6 +150,10 @@ export function CoverCanvas({
       return { scale: photo?.scale ?? 1, rotation: photo?.rotation ?? 0 };
     },
     onScale: (id, scale) => {
+      if (id === COVER_TITLE_LAYER_ID) {
+        onScaleTitle?.(scale);
+        return;
+      }
       if (textsRef.current.some((item) => item.id === id)) {
         onScaleText?.(id, scale);
         return;
@@ -137,6 +165,10 @@ export function CoverCanvas({
       onScalePhoto?.(id, scale);
     },
     onRotate: (id, rotation) => {
+      if (id === COVER_TITLE_LAYER_ID) {
+        onRotateTitle?.(rotation);
+        return;
+      }
       if (textsRef.current.some((item) => item.id === id)) {
         onRotateText?.(id, rotation);
         return;
@@ -234,6 +266,8 @@ export function CoverCanvas({
         color={titleColor}
         x={titleX}
         y={titleY}
+        scale={titleScale}
+        rotation={titleRotation}
         selected={editable && selectedTitle}
         editable={editable}
         layoutRef={layoutRef}

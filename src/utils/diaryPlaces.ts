@@ -64,6 +64,7 @@ export function buildPlaceSelections(photos: DiaryPhoto[]): DiaryPlaceSelection[
     placeName: group.placeName,
     photoIds: [group.photo.id],
     representativePhotoId: group.photo.id,
+    placeContentId: group.photo.placeContentId ?? null,
   }));
 }
 
