@@ -1,6 +1,6 @@
 import { AiCourse, AiCourseTransport } from '../types/aiCourse';
 
-export const AI_COURSE_TRANSPORTS: AiCourseTransport[] = ['승용차', '대중교통', '도보'];
+export const AI_COURSE_TRANSPORTS: AiCourseTransport[] = ['자차', '대중교통'];
 
 /** 코스 생성 API 연동 전 사용하는 임시 목록 */
 export const AI_COURSES: AiCourse[] = [
@@ -9,7 +9,7 @@ export const AI_COURSES: AiCourse[] = [
     title: '제주도 3박 4일 감성 카페 투어',
     tags: ['#제주', '#카페', '#휴양'],
     startDate: '2026.09.12',
-    transport: '승용차',
+    transport: '자차',
     days: [
       {
         day: 1,
@@ -92,7 +92,7 @@ export const AI_COURSES: AiCourse[] = [
     title: '강릉 1박 2일 식도락 여행',
     tags: ['#강원도', '#맛집', '#친구와'],
     startDate: '2026.08.20',
-    transport: '승용차',
+    transport: '자차',
     days: [
       {
         day: 1,

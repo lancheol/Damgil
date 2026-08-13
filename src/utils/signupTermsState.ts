@@ -1,57 +1,53 @@
-import { TermsType } from '../navigation/types';
+import { TERMS_ITEMS, TermsType } from '../constants/terms';
 
-export type SignupTermsState = {
-  hasReadService: boolean;
-  hasReadPrivacy: boolean;
-  agreedService: boolean;
-  agreedPrivacy: boolean;
+export type TermConsent = {
+  hasRead: boolean;
+  agreed: boolean;
 };
 
-const INITIAL_STATE: SignupTermsState = {
-  hasReadService: false,
-  hasReadPrivacy: false,
-  agreedService: false,
-  agreedPrivacy: false,
-};
+export type SignupTermsState = Record<TermsType, TermConsent>;
 
-let signupTermsState: SignupTermsState = { ...INITIAL_STATE };
+const emptyConsent = (): TermConsent => ({ hasRead: false, agreed: false });
+
+function createInitialState(): SignupTermsState {
+  return TERMS_ITEMS.reduce((state, item) => {
+    state[item.type] = emptyConsent();
+    return state;
+  }, {} as SignupTermsState);
+}
+
+let signupTermsState: SignupTermsState = createInitialState();
 
 export function getSignupTermsState(): SignupTermsState {
-  return { ...signupTermsState };
+  return {
+    privacy: { ...signupTermsState.privacy },
+    service: { ...signupTermsState.service },
+    location: { ...signupTermsState.location },
+    marketing: { ...signupTermsState.marketing },
+  };
 }
 
 export function resetSignupTermsState(): void {
-  signupTermsState = { ...INITIAL_STATE };
+  signupTermsState = createInitialState();
 }
 
 export function markTermsReadAndAgreed(type: TermsType): void {
-  if (type === 'service') {
-    signupTermsState = {
-      ...signupTermsState,
-      hasReadService: true,
-      agreedService: true,
-    };
-    return;
-  }
-
+  const required = TERMS_ITEMS.some((item) => item.type === type && item.required);
   signupTermsState = {
     ...signupTermsState,
-    hasReadPrivacy: true,
-    agreedPrivacy: true,
+    [type]: {
+      hasRead: true,
+      agreed: required ? true : signupTermsState[type].agreed,
+    },
   };
 }
 
 export function setTermsAgreed(type: TermsType, agreed: boolean): void {
-  if (type === 'service') {
-    signupTermsState = {
-      ...signupTermsState,
-      agreedService: agreed,
-    };
-    return;
-  }
-
   signupTermsState = {
     ...signupTermsState,
-    agreedPrivacy: agreed,
+    [type]: {
+      ...signupTermsState[type],
+      agreed,
+    },
   };
 }

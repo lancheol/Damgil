@@ -5,6 +5,7 @@ import { Alert, Modal, Pressable, ScrollView, StyleSheet, Text, View } from 'rea
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { BackButton } from '../../components/common/BackButton';
+import { TermsBody } from '../../components/common/TermsBody';
 import { TERMS_CONTENT } from '../../constants/terms';
 import { useAuth } from '../../context/AuthContext';
 import type { RootStackParamList, TermsType } from '../../navigation/types';
@@ -21,8 +22,10 @@ type SettingsItem = {
 const SETTINGS_ITEMS: SettingsItem[] = [
   { id: 'feedback', label: '피드백 보내기' },
   { id: 'guide', label: '사용 가이드' },
-  { id: 'terms', label: '이용 약관', terms: 'service' },
-  { id: 'privacy', label: '개인정보 처리 방침', terms: 'privacy' },
+  { id: 'terms', label: '서비스 이용약관', terms: 'service' },
+  { id: 'privacy', label: '개인정보 처리방침', terms: 'privacy' },
+  { id: 'location', label: '위치기반 서비스 이용약관', terms: 'location' },
+  { id: 'marketing', label: '마케팅 정보 수신 동의', terms: 'marketing' },
 ];
 
 const DANGER_RED = '#FB2C36';
@@ -138,7 +141,7 @@ export function SettingsScreen({}: Props) {
             ]}
             showsVerticalScrollIndicator={false}
           >
-            <Text style={styles.termsBody}>{terms ? TERMS_CONTENT[terms].body : ''}</Text>
+            {terms ? <TermsBody body={TERMS_CONTENT[terms].body} /> : null}
           </ScrollView>
         </View>
       </Modal>
@@ -232,11 +235,6 @@ const styles = StyleSheet.create({
   termsContent: {
     paddingHorizontal: spacing.lg + 4,
     paddingTop: spacing.lg,
-  },
-  termsBody: {
-    fontSize: 14,
-    lineHeight: 24,
-    color: ROW_LABEL,
   },
   pressed: {
     opacity: 0.7,

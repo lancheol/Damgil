@@ -27,7 +27,11 @@ import { RootStackParamList } from './types';
 const Stack = createNativeStackNavigator<RootStackParamList>();
 
 export function RootNavigator() {
-  const { isAuthenticated } = useAuth();
+  const { isAuthenticated, isReady } = useAuth();
+
+  if (!isReady) {
+    return null;
+  }
 
   return (
     <NavigationContainer>
@@ -39,8 +43,7 @@ export function RootNavigator() {
               name="Settings"
               component={SettingsScreen}
               options={{
-                presentation: 'modal',
-                animation: 'slide_from_bottom',
+                animation: 'slide_from_right',
               }}
             />
             <Stack.Screen

@@ -1,4 +1,10 @@
 import { AiCourse, AiCourseDay, AiCourseStop, CreateAiCourseInput } from '../types/aiCourse';
+import {
+  COURSE_MAX_DAYS,
+  formatDotDate,
+  formatNightDayLabel,
+  inclusiveDayCount,
+} from './dateRange';
 
 type RegionBase = {
   keyword: string;
@@ -41,25 +47,8 @@ function hashOffset(seed: string, index: number): { latitude: number; longitude:
   };
 }
 
-/** '2박 3일' → 3, '당일치기' → 1 */
-function resolveDayCount(schedule: string): number {
-  const nightMatch = schedule.match(/(\d+)\s*박/);
-  if (nightMatch) {
-    return Math.min(Number(nightMatch[1]) + 1, 5);
-  }
-
-  const dayMatch = schedule.match(/(\d+)\s*일/);
-  if (dayMatch) {
-    return Math.min(Math.max(Number(dayMatch[1]), 1), 5);
-  }
-
-  return 1;
-}
-
-function formatDate(date: Date): string {
-  const month = `${date.getMonth() + 1}`.padStart(2, '0');
-  const day = `${date.getDate()}`.padStart(2, '0');
-  return `${date.getFullYear()}.${month}.${day}`;
+function resolveDayCount(startDate: string, endDate: string): number {
+  return Math.min(Math.max(inclusiveDayCount(startDate, endDate), 1), COURSE_MAX_DAYS);
 }
 
 function buildStops(
@@ -89,9 +78,9 @@ function buildStops(
 /** 코스 생성 API 연동 전, 입력값으로 코스 초안을 만든다 */
 export function buildAiCourse(input: CreateAiCourseInput): AiCourse {
   const destination = input.destination.trim() || '국내';
-  const schedule = input.schedule.trim() || '당일치기';
+  const dayCount = resolveDayCount(input.startDate, input.endDate);
+  const schedule = formatNightDayLabel(dayCount);
   const base = resolveBase(destination);
-  const dayCount = resolveDayCount(schedule);
 
   const perDay = Math.max(1, Math.ceil(input.places.length / dayCount));
   const days: AiCourseDay[] = Array.from({ length: dayCount }, (_, dayIndex) => {
@@ -103,14 +92,11 @@ export function buildAiCourse(input: CreateAiCourseInput): AiCourse {
     };
   });
 
-  const departure = new Date();
-  departure.setDate(departure.getDate() + 7);
-
   return {
     id: `course-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
     title: `${destination} ${schedule} AI 추천 코스`,
     tags: [`#${destination}`, `#${schedule}`, `#${input.transport}`],
-    startDate: formatDate(departure),
+    startDate: formatDotDate(input.startDate),
     transport: input.transport,
     days,
   };

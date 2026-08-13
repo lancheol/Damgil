@@ -16,11 +16,8 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
-import {
-  MyPageAvatarIcon,
-  MyPageHeartIcon,
-  MyPageSettingsIcon,
-} from '../../components/mypage/MyPageIcons';
+import { MyPageHeartIcon, MyPageSettingsIcon } from '../../components/mypage/MyPageIcons';
+import { ProfileAvatar } from '../../components/mypage/ProfileAvatar';
 import { useAuth } from '../../context/AuthContext';
 import { useDiaries } from '../../context/DiaryContext';
 import { MainTabParamList, RootStackParamList } from '../../navigation/types';
@@ -161,9 +158,7 @@ export function MyPageScreen({ navigation }: Props) {
         ListHeaderComponent={
           <View>
             <View style={styles.profileRow}>
-              <View style={styles.avatar}>
-                <MyPageAvatarIcon size={32} />
-              </View>
+              <ProfileAvatar uri={user?.avatarUri} size={64} />
               <View style={styles.profileCopy}>
                 <Text style={styles.username}>{username}</Text>
                 <Text style={styles.bio} numberOfLines={2}>
@@ -276,16 +271,6 @@ const styles = StyleSheet.create({
     gap: spacing.md,
     paddingTop: spacing.md,
     paddingBottom: spacing.sm,
-  },
-  avatar: {
-    width: 64,
-    height: 64,
-    borderRadius: 32,
-    backgroundColor: '#E5E7EB',
-    borderWidth: 2,
-    borderColor: '#F3F4F6',
-    alignItems: 'center',
-    justifyContent: 'center',
   },
   profileCopy: {
     flex: 1,

@@ -17,11 +17,18 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { AuthTextInput } from '../../components/auth/AuthTextInput';
 import { BackButton } from '../../components/common/BackButton';
 import { DamgilLogo } from '../../components/home/DamgilLogo';
-import { useAuth } from '../../context/AuthContext';
+import { TERMS_ITEMS } from '../../constants/terms';
+import { mapSignupError, useAuth } from '../../context/AuthContext';
 import { AuthStackParamList, TermsType } from '../../navigation/types';
 import { colors, radii, spacing, typography } from '../../theme';
-import { isValidPhone, normalizePhone, validateSignUpForm } from '../../utils/authValidation';
 import {
+  NICKNAME_MAX_LENGTH,
+  NICKNAME_RULE_HINT,
+  normalizeNickname,
+  validateSignUpForm,
+} from '../../utils/authValidation';
+import {
+  SignupTermsState,
   getSignupTermsState,
   resetSignupTermsState,
   setTermsAgreed,
@@ -31,24 +38,16 @@ type Props = NativeStackScreenProps<AuthStackParamList, 'SignUp'>;
 
 type FormErrors = ReturnType<typeof validateSignUpForm>;
 
-const MOCK_VERIFICATION_CODE = '1234';
-
 export function SignUpScreen({ navigation }: Props) {
   const { signUp } = useAuth();
 
-  const [username, setUsername] = useState('');
+  const [email, setEmail] = useState('');
+  const [nickname, setNickname] = useState('');
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
-  const [phone, setPhone] = useState('');
-  const [verificationCode, setVerificationCode] = useState('');
-  const [codeSent, setCodeSent] = useState(false);
-  const [phoneVerified, setPhoneVerified] = useState(false);
 
-  const initialTerms = getSignupTermsState();
-  const [hasReadService, setHasReadService] = useState(initialTerms.hasReadService);
-  const [hasReadPrivacy, setHasReadPrivacy] = useState(initialTerms.hasReadPrivacy);
-  const [agreedService, setAgreedService] = useState(initialTerms.agreedService);
-  const [agreedPrivacy, setAgreedPrivacy] = useState(initialTerms.agreedPrivacy);
+  const [consents, setConsents] = useState<SignupTermsState>(getSignupTermsState);
+  const [agreedAge14, setAgreedAge14] = useState(false);
 
   const [errors, setErrors] = useState<FormErrors>({});
   const [submitting, setSubmitting] = useState(false);
@@ -56,11 +55,7 @@ export function SignUpScreen({ navigation }: Props) {
 
   useFocusEffect(
     useCallback(() => {
-      const terms = getSignupTermsState();
-      setHasReadService(terms.hasReadService);
-      setHasReadPrivacy(terms.hasReadPrivacy);
-      setAgreedService(terms.agreedService);
-      setAgreedPrivacy(terms.agreedPrivacy);
+      setConsents(getSignupTermsState());
     }, []),
   );
 
@@ -69,67 +64,26 @@ export function SignUpScreen({ navigation }: Props) {
   };
 
   const toggleAgreement = (type: TermsType) => {
-    const hasRead = type === 'service' ? hasReadService : hasReadPrivacy;
-    if (!hasRead) {
+    if (!consents[type].hasRead) {
       Alert.alert('약관 확인', '먼저 ‘읽기’를 눌러 약관을 확인해 주세요.');
       return;
     }
 
-    if (type === 'service') {
-      setAgreedService((prev) => {
-        const next = !prev;
-        setTermsAgreed('service', next);
-        return next;
-      });
-      return;
-    }
-
-    setAgreedPrivacy((prev) => {
-      const next = !prev;
-      setTermsAgreed('privacy', next);
-      return next;
-    });
-  };
-
-  const handleSendCode = () => {
-    if (!isValidPhone(phone)) {
-      setErrors((prev) => ({
-        ...prev,
-        phone: '올바른 휴대폰 번호 형식이 아닙니다.',
-      }));
-      return;
-    }
-
-    setErrors((prev) => ({ ...prev, phone: undefined, phoneVerified: undefined }));
-    setPhoneVerified(false);
-    setCodeSent(true);
-    setVerificationCode('');
-    Alert.alert('인증번호 발송', `테스트용 인증번호는 ${MOCK_VERIFICATION_CODE} 입니다.`);
-  };
-
-  const handleVerifyCode = () => {
-    if (verificationCode.trim() !== MOCK_VERIFICATION_CODE) {
-      setErrors((prev) => ({
-        ...prev,
-        phoneVerified: '인증번호가 올바르지 않습니다.',
-      }));
-      setPhoneVerified(false);
-      return;
-    }
-
-    setPhoneVerified(true);
-    setErrors((prev) => ({ ...prev, phoneVerified: undefined }));
+    const next = !consents[type].agreed;
+    setTermsAgreed(type, next);
+    setConsents(getSignupTermsState());
   };
 
   const handleSubmit = async () => {
     const nextErrors = validateSignUpForm({
-      username,
+      email,
+      nickname,
       password,
       confirmPassword,
-      phone,
-      phoneVerified,
-      agreedService,
-      agreedPrivacy,
+      agreedPrivacy: consents.privacy.agreed,
+      agreedService: consents.service.agreed,
+      agreedLocation: consents.location.agreed,
+      agreedAge14,
     });
     setErrors(nextErrors);
     setFormError(null);
@@ -141,13 +95,30 @@ export function SignUpScreen({ navigation }: Props) {
     try {
       setSubmitting(true);
       await signUp({
-        username: username.trim(),
+        email: email.trim(),
         password,
-        phone: normalizePhone(phone),
+        nickname: normalizeNickname(nickname),
+        agreements: {
+          terms: consents.service.agreed,
+          privacy: consents.privacy.agreed,
+          age14: agreedAge14,
+          location: consents.location.agreed,
+          marketing: consents.marketing.agreed,
+        },
       });
       resetSignupTermsState();
-    } catch {
-      setFormError('회원가입에 실패했습니다. 잠시 후 다시 시도해 주세요.');
+      Alert.alert('가입 완료', '로그인해 주세요.', [
+        {
+          text: '확인',
+          onPress: () =>
+            navigation.reset({
+              index: 0,
+              routes: [{ name: 'Login' }],
+            }),
+        },
+      ]);
+    } catch (error) {
+      setFormError(mapSignupError(error));
     } finally {
       setSubmitting(false);
     }
@@ -171,17 +142,30 @@ export function SignUpScreen({ navigation }: Props) {
           <View style={styles.brand}>
             <DamgilLogo size={56} />
             <Text style={styles.title}>여행 기록을 시작해 보세요</Text>
-            <Text style={styles.subtitle}>사용자 이름이 로그인 아이디로 사용됩니다.</Text>
+            <Text style={styles.subtitle}>이메일로 가입한 뒤 로그인하면 여행을 기록할 수 있어요.</Text>
           </View>
 
           <View style={styles.form}>
             <AuthTextInput
-              label="사용자 이름"
-              value={username}
-              onChangeText={setUsername}
-              error={errors.username}
-              placeholder="이름"
-              textContentType="username"
+              label="이메일"
+              value={email}
+              onChangeText={setEmail}
+              error={errors.email}
+              placeholder="you@example.com"
+              keyboardType="email-address"
+              textContentType="emailAddress"
+              autoComplete="email"
+              autoCorrect={false}
+            />
+            <AuthTextInput
+              label="닉네임"
+              value={nickname}
+              onChangeText={setNickname}
+              error={errors.nickname}
+              hint={NICKNAME_RULE_HINT}
+              placeholder="예) damgil.user"
+              maxLength={NICKNAME_MAX_LENGTH}
+              textContentType="nickname"
               autoComplete="username"
               autoCorrect={false}
             />
@@ -190,7 +174,7 @@ export function SignUpScreen({ navigation }: Props) {
               value={password}
               onChangeText={setPassword}
               error={errors.password}
-              placeholder="6자 이상"
+              placeholder="8자 이상"
               secureTextEntry
               textContentType="newPassword"
               autoComplete="new-password"
@@ -206,97 +190,31 @@ export function SignUpScreen({ navigation }: Props) {
               autoComplete="new-password"
             />
 
-            <View style={styles.phoneBlock}>
-              <Text style={styles.fieldLabel}>전화번호</Text>
-              <View style={styles.phoneRow}>
-                <AuthTextInput
-                  label="전화번호"
-                  hideLabel
-                  containerStyle={styles.phoneInput}
-                  value={phone}
-                  onChangeText={(text) => {
-                    setPhone(text);
-                    setPhoneVerified(false);
-                    setCodeSent(false);
-                  }}
-                  error={errors.phone}
-                  placeholder="01012345678"
-                  keyboardType="phone-pad"
-                  textContentType="telephoneNumber"
-                />
-                <Pressable
-                  accessibilityRole="button"
-                  onPress={handleSendCode}
-                  style={({ pressed }) => [
-                    styles.phoneSendButton,
-                    pressed && styles.secondaryButtonPressed,
-                  ]}
-                >
-                  <Text
-                    style={styles.phoneSendButtonText}
-                    numberOfLines={1}
-                    adjustsFontSizeToFit
-                    minimumFontScale={0.85}
-                  >
-                    {codeSent ? '재발송' : '인증번호 받기'}
-                  </Text>
-                </Pressable>
-              </View>
-
-              {codeSent ? (
-                <View style={styles.verifyRow}>
-                  <View style={styles.verifyInput}>
-                    <AuthTextInput
-                      label="인증번호"
-                      value={verificationCode}
-                      onChangeText={setVerificationCode}
-                      error={errors.phoneVerified}
-                      placeholder="1234"
-                      keyboardType="number-pad"
-                      maxLength={6}
-                    />
-                  </View>
-                  <Pressable
-                    accessibilityRole="button"
-                    onPress={handleVerifyCode}
-                    style={({ pressed }) => [
-                      styles.verifyButton,
-                      phoneVerified && styles.verifyButtonDone,
-                      pressed && styles.secondaryButtonPressed,
-                    ]}
-                  >
-                    <Text
-                      style={[
-                        styles.secondaryButtonText,
-                        phoneVerified && styles.verifyButtonDoneText,
-                      ]}
-                    >
-                      {phoneVerified ? '인증완료' : '확인'}
-                    </Text>
-                  </Pressable>
-                </View>
-              ) : null}
-              {!codeSent && errors.phoneVerified ? (
-                <Text style={styles.inlineError}>{errors.phoneVerified}</Text>
-              ) : null}
-            </View>
-
             <View style={styles.section}>
               <Text style={styles.sectionLabel}>약관 동의</Text>
-              <TermsRow
-                title="서비스 이용약관"
-                agreed={agreedService}
-                hasRead={hasReadService}
-                onPressRead={() => openTerms('service')}
-                onToggleAgree={() => toggleAgreement('service')}
-              />
-              <TermsRow
-                title="개인정보 처리방침"
-                agreed={agreedPrivacy}
-                hasRead={hasReadPrivacy}
-                onPressRead={() => openTerms('privacy')}
-                onToggleAgree={() => toggleAgreement('privacy')}
-              />
+              {TERMS_ITEMS.map((item) => (
+                <TermsRow
+                  key={item.type}
+                  title={`${item.title} (${item.required ? '필수' : '선택'})`}
+                  agreed={consents[item.type].agreed}
+                  hasRead={consents[item.type].hasRead}
+                  onPressRead={() => openTerms(item.type)}
+                  onToggleAgree={() => toggleAgreement(item.type)}
+                />
+              ))}
+              <Pressable
+                accessibilityRole="checkbox"
+                accessibilityState={{ checked: agreedAge14 }}
+                onPress={() => setAgreedAge14((prev) => !prev)}
+                style={styles.termsRow}
+              >
+                <View style={styles.termsCheckArea}>
+                  <View style={[styles.checkbox, agreedAge14 && styles.checkboxChecked]}>
+                    {agreedAge14 ? <Text style={styles.checkmark}>✓</Text> : null}
+                  </View>
+                  <Text style={styles.termsTitle}>만 14세 이상입니다 (필수)</Text>
+                </View>
+              </Pressable>
               {errors.terms ? <Text style={styles.inlineError}>{errors.terms}</Text> : null}
             </View>
 
@@ -406,72 +324,8 @@ const styles = StyleSheet.create({
   form: {
     gap: spacing.lg,
   },
-  phoneBlock: {
-    gap: spacing.sm,
-  },
-  fieldLabel: {
-    ...typography.label,
-    color: colors.ink,
-  },
-  phoneRow: {
-    flexDirection: 'row',
-    alignItems: 'flex-start',
-    gap: spacing.sm,
-  },
-  phoneInput: {
-    flex: 7,
-    minWidth: 0,
-  },
-  phoneSendButton: {
-    flex: 3,
-    minHeight: 48,
-    borderWidth: 1,
-    borderColor: colors.ink,
-    backgroundColor: colors.white,
-    borderRadius: radii.md,
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingHorizontal: spacing.sm,
-  },
-  phoneSendButtonText: {
-    ...typography.label,
-    color: colors.ink,
-    textAlign: 'center',
-    fontSize: 12,
-    lineHeight: 16,
-  },
   secondaryButtonPressed: {
     opacity: 0.85,
-  },
-  secondaryButtonText: {
-    ...typography.label,
-    color: colors.ink,
-  },
-  verifyRow: {
-    flexDirection: 'row',
-    alignItems: 'flex-end',
-    gap: spacing.sm,
-  },
-  verifyInput: {
-    flex: 1,
-  },
-  verifyButton: {
-    borderWidth: 1,
-    borderColor: colors.ink,
-    backgroundColor: colors.white,
-    borderRadius: radii.md,
-    minHeight: 48,
-    paddingHorizontal: spacing.lg,
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginBottom: 2,
-  },
-  verifyButtonDone: {
-    backgroundColor: colors.black,
-    borderColor: colors.black,
-  },
-  verifyButtonDoneText: {
-    color: colors.white,
   },
   section: {
     gap: spacing.md,

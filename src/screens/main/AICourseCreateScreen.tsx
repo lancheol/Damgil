@@ -14,10 +14,12 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { BackButton } from '../../components/common/BackButton';
+import { DateRangeCalendarModal } from '../../components/common/DateRangeCalendarModal';
 import { AI_COURSE_TRANSPORTS } from '../../constants/aiCourses';
 import { RootStackParamList } from '../../navigation/types';
 import { AiCourseTransport } from '../../types/aiCourse';
 import { colors } from '../../theme';
+import { formatDateRangeLabel } from '../../utils/dateRange';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'AICourseCreate'>;
 
@@ -25,12 +27,14 @@ const H_PADDING = 20;
 
 export function AICourseCreateScreen({ navigation }: Props) {
   const [destination, setDestination] = useState('');
-  const [schedule, setSchedule] = useState('');
-  const [transport, setTransport] = useState<AiCourseTransport>('승용차');
+  const [startDate, setStartDate] = useState<string | null>(null);
+  const [endDate, setEndDate] = useState<string | null>(null);
+  const [calendarOpen, setCalendarOpen] = useState(false);
+  const [transport, setTransport] = useState<AiCourseTransport>('자차');
   const [placeQuery, setPlaceQuery] = useState('');
   const [places, setPlaces] = useState<string[]>([]);
 
-  const canSubmit = destination.trim().length > 0 && schedule.trim().length > 0;
+  const canSubmit = destination.trim().length > 0 && Boolean(startDate && endDate);
 
   const addPlace = () => {
     const trimmed = placeQuery.trim();
@@ -46,13 +50,14 @@ export function AICourseCreateScreen({ navigation }: Props) {
   };
 
   const submit = () => {
-    if (!canSubmit) {
+    if (!canSubmit || !startDate || !endDate) {
       return;
     }
     navigation.replace('AICourseLoading', {
       input: {
         destination: destination.trim(),
-        schedule: schedule.trim(),
+        startDate,
+        endDate,
         transport,
         places,
       },
@@ -89,13 +94,23 @@ export function AICourseCreateScreen({ navigation }: Props) {
 
           <View style={styles.field}>
             <Text style={styles.label}>여행 일정</Text>
-            <TextInput
-              style={styles.input}
-              value={schedule}
-              onChangeText={setSchedule}
-              placeholder="예) 2박 3일, 당일치기"
-              placeholderTextColor="#99A1AF"
-            />
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel="여행 날짜 선택"
+              onPress={() => setCalendarOpen(true)}
+              style={({ pressed }) => [styles.dateField, pressed && styles.pressed]}
+            >
+              <Ionicons
+                name="calendar-outline"
+                size={18}
+                color={startDate ? '#1E2939' : '#99A1AF'}
+              />
+              <Text style={[styles.dateFieldText, !startDate && styles.datePlaceholder]}>
+                {startDate && endDate
+                  ? formatDateRangeLabel(startDate, endDate)
+                  : '달력에서 날짜를 선택하세요'}
+              </Text>
+            </Pressable>
           </View>
 
           <View style={styles.field}>
@@ -178,6 +193,18 @@ export function AICourseCreateScreen({ navigation }: Props) {
           </Pressable>
         </View>
       </KeyboardAvoidingView>
+
+      <DateRangeCalendarModal
+        visible={calendarOpen}
+        startDate={startDate}
+        endDate={endDate}
+        onClose={() => setCalendarOpen(false)}
+        onApply={(range) => {
+          setStartDate(range.startDate);
+          setEndDate(range.endDate);
+          setCalendarOpen(false);
+        }}
+      />
     </SafeAreaView>
   );
 }
@@ -230,6 +257,25 @@ const styles = StyleSheet.create({
     borderColor: '#E5E7EB',
     fontSize: 14,
     color: '#1E2939',
+  },
+  dateField: {
+    minHeight: 46,
+    paddingHorizontal: 16,
+    borderRadius: 12,
+    backgroundColor: '#F9FAFB',
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: '#E5E7EB',
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+  },
+  dateFieldText: {
+    flex: 1,
+    fontSize: 14,
+    color: '#1E2939',
+  },
+  datePlaceholder: {
+    color: '#99A1AF',
   },
   transportRow: {
     flexDirection: 'row',

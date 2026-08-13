@@ -30,6 +30,9 @@ export type DiaryCover = {
   coverPhotoId: string | null;
   title: string;
   fontId: DecorFontId;
+  /** 표지 제목 위치 (0~1), 기본 중앙 */
+  titleX?: number;
+  titleY?: number;
   stickers: DecorSticker[];
   /** 표지 위 자유 배치 사진 레이어 */
   photos?: DecorPhotoLayer[];

@@ -1,8 +1,9 @@
 import { NavigatorScreenParams } from '@react-navigation/native';
 
+import { TermsType } from '../constants/terms';
 import { AiCourse, CreateAiCourseInput } from '../types/aiCourse';
 
-export type TermsType = 'service' | 'privacy';
+export type { TermsType };
 
 export type AuthStackParamList = {
   Login: undefined;

@@ -1,0 +1,53 @@
+---
+description: Damgil/Triplog backend API contract — follow before any server integration
+alwaysApply: true
+---
+
+# Backend API (Triplog COM, live)
+
+Do **not** invent endpoints or response types. Swagger is source of truth: https://dam-gil.duckdns.org/docs and `/docs-json`. If notes disagree with Swagger, **Swagger wins**. Prefer generating clients/types from OpenAPI — do not hand-write API types.
+
+## Base URL
+
+- HTTPS only: `https://dam-gil.duckdns.org` (env var, never hardcode HTTP / IP `43.201.230.238` in the app)
+- API prefix: `/api/v1` except health `GET /health`
+- CORS: backend currently allows local dev ports only. Deployed web origin must be added by backend or browser calls fail.
+- Never commit test-account passwords or tokens.
+
+## Auth (JWT)
+
+- `POST /auth/signup` · `/auth/login` → access + refresh
+- Header: `Authorization: Bearer <access>`
+- Refresh: `POST /auth/refresh`. Logout: `POST /auth/logout` (invalidates all sessions)
+- Kakao mobile: `POST /auth/kakao` body `{ accessToken, agreements }`. New Kakao users **must** send required agreements (`terms` / `privacy` / `age14`) or 400. Existing users: token only. Deleted account → `ACCOUNT_DELETED`
+- Kakao web: `GET /auth/kakao/login` (+ agreement query params for new users) → callback issues JWT. Same identity (`provider=kakao`) as mobile.
+- Show agreement UI **before** first Kakao signup. No implicit consent.
+
+## Errors & rate limit
+
+```json
+{ "error": { "code": "...", "message": "...", "detail": "..." } }
+```
+
+Branch on `error.code` (message can change). Example: bad Kakao token → `401 KAKAO_TOKEN_INVALID`. Required-agreement withdraw → `400 AGREEMENT_REQUIRED_CANNOT_WITHDRAW` → steer to account deletion.
+
+429 includes `Retry-After` and `retryAfterSec`. Wait before retry. Course create and recommend have stricter limits — do not spam.
+
+## Domain map (sketch — confirm in Swagger)
+
+- Profile: `GET/PATCH /users/me`, `PUT /users/me/profile`
+- Agreements: `GET/PATCH /users/me/agreements`, `GET .../history` (append-only)
+- Places (public, shared place_id): `GET /places/nearby` · `/places/search` · `/places/:contentId`
+- Also public: `/festivals` · `/courses` (TourAPI) · `/meta/*`
+- Trips (auth): `POST /trips` · `PATCH /trips/:id/end` · `POST /trips/:id/items` · `GET /trips/:id`
+- Feed/social: `/feed/me` · `/feed/public` · likes/comments/saves
+- Moderation: `/blocks` · `/reports` · `/inquiries`
+- Account delete: **`DELETE /account` only** (hard purge including S3). Do not use `DELETE /users/me`
+- Recommend (sync): `GET /recommend?styles=…` · `/recommend/now` (styles can be query params without saved profile)
+- Courses (async): `POST /courses` → **202 `{ jobId }`**. Poll `GET /courses/jobs/:jobId` until `대기|실행중|완료|실패`. Then `GET /courses/mine` · `/courses/:id`. In-flight duplicate is blocked; regenerate after complete is OK. Cafes/restaurants from Kakao; **no lodging**.
+
+## Product rules
+
+- Trip visibility: `private` | `public` (default private)
+- Feed pagination: cursor-based — check Swagger (`page`/`limit` vs cursor)
+- After delete, old access token may still 200 until TTL (~15m) but data is already gone

@@ -2,6 +2,7 @@ import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
+import { TermsBody } from '../../components/common/TermsBody';
 import { TERMS_CONTENT } from '../../constants/terms';
 import { AuthStackParamList } from '../../navigation/types';
 import { colors, radii, spacing, typography } from '../../theme';
@@ -25,7 +26,7 @@ export function TermsDetailScreen({ navigation, route }: Props) {
         showsVerticalScrollIndicator
       >
         <View style={styles.paper}>
-          <Text style={styles.body}>{content.body}</Text>
+          <TermsBody body={content.body} />
         </View>
       </ScrollView>
 
@@ -78,11 +79,6 @@ const styles = StyleSheet.create({
     padding: spacing.xl,
     borderWidth: 1,
     borderColor: colors.border,
-  },
-  body: {
-    ...typography.body,
-    color: colors.inkSoft,
-    lineHeight: 24,
   },
   footer: {
     paddingHorizontal: spacing.xl,

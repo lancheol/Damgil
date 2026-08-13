@@ -16,6 +16,15 @@ export const COVER_FONTS = DECOR_FONTS;
 export const COVER_STICKER_EMOJIS = DECOR_STICKER_EMOJIS;
 
 export const DEFAULT_COVER_COLOR = '#1A1A1A';
+export const DEFAULT_COVER_TITLE_X = 0.5;
+export const DEFAULT_COVER_TITLE_Y = 0.5;
+
+export function clampCoverTitleAxis(value: number | undefined, fallback: number): number {
+  if (typeof value !== 'number' || Number.isNaN(value)) {
+    return fallback;
+  }
+  return Math.min(0.92, Math.max(0.08, value));
+}
 
 /** 표지 배경색 팔레트 (임의) */
 export const COVER_COLORS = [
@@ -55,6 +64,8 @@ export function createEmptyCover(title: string): DiaryCover {
     coverPhotoId: null,
     title,
     fontId: 'sans',
+    titleX: DEFAULT_COVER_TITLE_X,
+    titleY: DEFAULT_COVER_TITLE_Y,
     stickers: [],
     photos: [],
     texts: [],
@@ -116,6 +127,8 @@ export function normalizeCover(cover: DiaryCover | null | undefined, fallbackTit
     coverPhotoId: cover.coverPhotoId ?? null,
     title: cover.title?.trim() || fallbackTitle,
     fontId: cover.fontId ?? 'sans',
+    titleX: clampCoverTitleAxis(cover.titleX, DEFAULT_COVER_TITLE_X),
+    titleY: clampCoverTitleAxis(cover.titleY, DEFAULT_COVER_TITLE_Y),
     stickers: Array.isArray(cover.stickers) ? cover.stickers : [],
     photos: normalizeCoverPhotos(cover.photos),
     texts: normalizeCoverTexts(cover.texts),

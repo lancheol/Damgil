@@ -15,6 +15,7 @@ type AuthTextInputProps = {
   value: string;
   onChangeText: (text: string) => void;
   error?: string;
+  hint?: string;
   hideLabel?: boolean;
   containerStyle?: StyleProp<ViewStyle>;
 } & Omit<TextInputProps, 'value' | 'onChangeText'>;
@@ -24,6 +25,7 @@ export function AuthTextInput({
   value,
   onChangeText,
   error,
+  hint,
   hideLabel = false,
   containerStyle,
   ...inputProps
@@ -40,6 +42,7 @@ export function AuthTextInput({
         {...inputProps}
       />
       {error ? <Text style={styles.error}>{error}</Text> : null}
+      {!error && hint ? <Text style={styles.hint}>{hint}</Text> : null}
     </View>
   );
 }
@@ -68,5 +71,9 @@ const styles = StyleSheet.create({
   error: {
     fontSize: 12,
     color: colors.danger,
+  },
+  hint: {
+    fontSize: 12,
+    color: colors.inkMuted,
   },
 });

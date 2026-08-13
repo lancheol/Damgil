@@ -1,6 +1,7 @@
 import { useRef } from 'react';
-import { Pressable, StyleSheet, Text, View, ViewStyle } from 'react-native';
+import { Pressable, StyleSheet, View, ViewStyle } from 'react-native';
 
+import { DraggableCoverTitle } from './DraggableCoverTitle';
 import { DraggablePhoto } from './DraggablePhoto';
 import { DraggableSticker, useCanvasPinchHandlers } from './DraggableSticker';
 import { DraggableText } from './DraggableText';
@@ -13,7 +14,8 @@ import {
 } from '../../types/diary';
 import {
   DEFAULT_COVER_COLOR,
-  getCoverFontStyle,
+  DEFAULT_COVER_TITLE_X,
+  DEFAULT_COVER_TITLE_Y,
   getCoverTitleColor,
 } from '../../utils/diaryCover';
 
@@ -21,6 +23,8 @@ type CoverCanvasProps = {
   backgroundColor?: string;
   title: string;
   fontId: CoverFontId;
+  titleX?: number;
+  titleY?: number;
   photos: DecorPhotoLayer[];
   photoById: Record<string, DiaryPhoto | undefined>;
   stickers: DecorSticker[];
@@ -28,6 +32,7 @@ type CoverCanvasProps = {
   selectedPhotoId: string | null;
   selectedStickerId: string | null;
   selectedTextId: string | null;
+  selectedTitle?: boolean;
   /** 책 껍데기 안에서 꽉 채울 때 */
   fill?: boolean;
   editable?: boolean;
@@ -36,6 +41,8 @@ type CoverCanvasProps = {
   onSelectPhoto?: (id: string) => void;
   onSelectSticker?: (id: string) => void;
   onSelectText?: (id: string) => void;
+  onSelectTitle?: () => void;
+  onMoveTitle?: (x: number, y: number) => void;
   onEditText?: (id: string) => void;
   onMovePhoto?: (id: string, x: number, y: number) => void;
   onScalePhoto?: (id: string, scale: number) => void;
@@ -57,6 +64,8 @@ export function CoverCanvas({
   backgroundColor = DEFAULT_COVER_COLOR,
   title,
   fontId,
+  titleX = DEFAULT_COVER_TITLE_X,
+  titleY = DEFAULT_COVER_TITLE_Y,
   photos,
   photoById,
   stickers,
@@ -64,6 +73,7 @@ export function CoverCanvas({
   selectedPhotoId,
   selectedStickerId,
   selectedTextId,
+  selectedTitle = false,
   fill = false,
   editable = true,
   style,
@@ -71,6 +81,8 @@ export function CoverCanvas({
   onSelectPhoto,
   onSelectSticker,
   onSelectText,
+  onSelectTitle,
+  onMoveTitle,
   onEditText,
   onMovePhoto,
   onScalePhoto,
@@ -158,15 +170,6 @@ export function CoverCanvas({
         <Pressable style={StyleSheet.absoluteFill} onPress={onBackgroundPress} />
       ) : null}
 
-      <View style={styles.titleWrap} pointerEvents="none">
-        <Text
-          style={[styles.title, getCoverFontStyle(fontId), { color: titleColor }]}
-          numberOfLines={4}
-        >
-          {title || '제목 없음'}
-        </Text>
-      </View>
-
       {photos.map((layer) => {
         const source = photoById[layer.photoId];
         if (!source?.uri) {
@@ -224,6 +227,19 @@ export function CoverCanvas({
           onDragEnd={(pageX, pageY) => onStickerDragEnd?.(sticker.id, pageX, pageY)}
         />
       ))}
+
+      <DraggableCoverTitle
+        title={title}
+        fontId={fontId}
+        color={titleColor}
+        x={titleX}
+        y={titleY}
+        selected={editable && selectedTitle}
+        editable={editable}
+        layoutRef={layoutRef}
+        onSelect={() => onSelectTitle?.()}
+        onMove={(nextX, nextY) => onMoveTitle?.(nextX, nextY)}
+      />
     </View>
   );
 }
@@ -240,17 +256,5 @@ const styles = StyleSheet.create({
   canvasFill: {
     flex: 1,
     borderRadius: 0,
-  },
-  titleWrap: {
-    ...StyleSheet.absoluteFillObject,
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingHorizontal: 28,
-    zIndex: 1,
-  },
-  title: {
-    fontSize: 28,
-    textAlign: 'center',
-    letterSpacing: -0.5,
   },
 });

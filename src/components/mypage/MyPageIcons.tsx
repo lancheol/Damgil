@@ -33,24 +33,6 @@ export function MyPageSettingsIcon({ size = 24, color = '#4A5565' }: IconProps) 
   );
 }
 
-export function MyPageAvatarIcon({ size = 32, color = '#9CA3AF' }: IconProps) {
-  return (
-    <Svg width={size} height={size} viewBox="0 0 32 32" fill="none">
-      <Path
-        d="M16 17.1429C19.1559 17.1429 21.7143 14.5845 21.7143 11.4286C21.7143 8.27266 19.1559 5.71429 16 5.71429C12.8441 5.71429 10.2857 8.27266 10.2857 11.4286C10.2857 14.5845 12.8441 17.1429 16 17.1429Z"
-        stroke={color}
-        strokeWidth={1.71429}
-      />
-      <Path
-        d="M4.57143 27.4286C4.57143 21.1166 9.688 16 16 16C22.312 16 27.4286 21.1166 27.4286 27.4286"
-        stroke={color}
-        strokeWidth={1.71429}
-        strokeLinecap="round"
-      />
-    </Svg>
-  );
-}
-
 export function MyPageHeartIcon({ size = 10 }: { size?: number }) {
   return (
     <Svg width={size} height={size} viewBox="0 0 10 10" fill="none">

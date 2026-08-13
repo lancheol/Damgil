@@ -1,4 +1,4 @@
-export type AiCourseTransport = '승용차' | '대중교통' | '도보';
+export type AiCourseTransport = '자차' | '대중교통';
 
 export type AiCourseStop = {
   id: string;
@@ -28,7 +28,10 @@ export type AiCourse = {
 
 export type CreateAiCourseInput = {
   destination: string;
-  schedule: string;
+  /** YYYY-MM-DD — 축제/지원금 조회용 */
+  startDate: string;
+  /** YYYY-MM-DD */
+  endDate: string;
   transport: AiCourseTransport;
   places: string[];
 };

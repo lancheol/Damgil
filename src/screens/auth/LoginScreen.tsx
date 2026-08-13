@@ -14,7 +14,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { AuthTextInput } from '../../components/auth/AuthTextInput';
 import { DamgilLogo } from '../../components/home/DamgilLogo';
-import { useAuth } from '../../context/AuthContext';
+import { mapLoginError, useAuth } from '../../context/AuthContext';
 import { AuthStackParamList } from '../../navigation/types';
 import { colors, radii, spacing, typography } from '../../theme';
 import { validateLoginForm } from '../../utils/authValidation';
@@ -23,20 +23,20 @@ import { resetSignupTermsState } from '../../utils/signupTermsState';
 type Props = NativeStackScreenProps<AuthStackParamList, 'Login'>;
 
 type FormErrors = {
-  username?: string;
+  email?: string;
   password?: string;
 };
 
 export function LoginScreen({ navigation }: Props) {
   const { signIn } = useAuth();
-  const [username, setUsername] = useState('');
+  const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [errors, setErrors] = useState<FormErrors>({});
   const [submitting, setSubmitting] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
 
   const handleSubmit = async () => {
-    const nextErrors = validateLoginForm({ username, password });
+    const nextErrors = validateLoginForm({ email, password });
     setErrors(nextErrors);
     setFormError(null);
 
@@ -46,9 +46,9 @@ export function LoginScreen({ navigation }: Props) {
 
     try {
       setSubmitting(true);
-      await signIn(username.trim(), password);
-    } catch {
-      setFormError('로그인에 실패했습니다. 잠시 후 다시 시도해 주세요.');
+      await signIn(email.trim(), password);
+    } catch (error) {
+      setFormError(mapLoginError(error));
     } finally {
       setSubmitting(false);
     }
@@ -69,18 +69,19 @@ export function LoginScreen({ navigation }: Props) {
           <View style={styles.brand}>
             <DamgilLogo size={64} />
             <Text style={styles.title}>담길에 오신 걸 환영해요</Text>
-            <Text style={styles.subtitle}>사용자 이름으로 로그인해 주세요.</Text>
+            <Text style={styles.subtitle}>이메일로 로그인해 주세요.</Text>
           </View>
 
           <View style={styles.form}>
             <AuthTextInput
-              label="사용자 이름"
-              value={username}
-              onChangeText={setUsername}
-              error={errors.username}
-              placeholder="이름"
-              textContentType="username"
-              autoComplete="username"
+              label="이메일"
+              value={email}
+              onChangeText={setEmail}
+              error={errors.email}
+              placeholder="you@example.com"
+              keyboardType="email-address"
+              textContentType="emailAddress"
+              autoComplete="email"
               autoCorrect={false}
               returnKeyType="next"
             />
@@ -89,7 +90,7 @@ export function LoginScreen({ navigation }: Props) {
               value={password}
               onChangeText={setPassword}
               error={errors.password}
-              placeholder="6자 이상"
+              placeholder="비밀번호"
               secureTextEntry
               textContentType="password"
               autoComplete="password"
