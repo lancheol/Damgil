@@ -14,6 +14,8 @@ export type Festival = {
   region: string;
   /** 시·군·구 단위 */
   district: string;
+  /** TourAPI 도로명/지번 주소 */
+  address?: string;
   /** YYYY-MM-DD */
   startDate: string;
   /** YYYY-MM-DD */

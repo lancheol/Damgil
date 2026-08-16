@@ -2,7 +2,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { CompositeScreenProps } from '@react-navigation/native';
 import { BottomTabScreenProps } from '@react-navigation/bottom-tabs';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import {
   Alert,
   Dimensions,
@@ -17,7 +17,6 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { MyPageHeartIcon } from '../../components/mypage/MyPageIcons';
-import { FESTIVALS } from '../../constants/festivals';
 import { SEARCH_USERS } from '../../constants/users';
 import { useDiaries } from '../../context/DiaryContext';
 import { MainTabParamList, RootStackParamList } from '../../navigation/types';
@@ -25,6 +24,8 @@ import { Diary } from '../../types/diary';
 import { CoverThumb } from '../../components/diary/CoverThumb';
 import { getCoverBackgroundColor, getEffectiveCover } from '../../utils/diaryCover';
 import { colors } from '../../theme';
+import type { Festival } from '../../types/festival';
+import { loadFestivals } from '../../utils/festivals';
 
 type Props = CompositeScreenProps<
   BottomTabScreenProps<MainTabParamList, 'Search'>,
@@ -70,6 +71,21 @@ type GridCell =
 export function SearchScreen({ navigation }: Props) {
   const { diaries } = useDiaries();
   const [query, setQuery] = useState('');
+  const [festivals, setFestivals] = useState<Festival[]>([]);
+
+  useEffect(() => {
+    let cancelled = false;
+    void loadFestivals()
+      .then((items) => {
+        if (!cancelled) setFestivals(items);
+      })
+      .catch(() => {
+        if (!cancelled) setFestivals([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   const cells = useMemo<GridCell[]>(() => {
     const ended = [...diaries]
@@ -106,10 +122,12 @@ export function SearchScreen({ navigation }: Props) {
       return [];
     }
     const needle = keyword.toLowerCase();
-    return FESTIVALS.filter((festival) =>
-      `${festival.region} ${festival.district} ${festival.title}`.toLowerCase().includes(needle),
+    return festivals.filter((festival) =>
+      `${festival.region} ${festival.district} ${festival.address ?? ''} ${festival.title}`
+        .toLowerCase()
+        .includes(needle),
     ).slice(0, 5);
-  }, [isSearching, keyword]);
+  }, [festivals, isSearching, keyword]);
 
   const diaryResults = useMemo(() => {
     if (!isSearching) {
@@ -219,7 +237,15 @@ export function SearchScreen({ navigation }: Props) {
                     style={({ pressed }) => [styles.placeCard, pressed && styles.pressed]}
                   >
                     <View style={styles.placeThumb}>
-                      <Ionicons name="image-outline" size={20} color="#9CA3AF" />
+                      {festival.imageUri ? (
+                        <Image
+                          source={{ uri: festival.imageUri }}
+                          style={styles.placeThumbImage}
+                          resizeMode="cover"
+                        />
+                      ) : (
+                        <Ionicons name="image-outline" size={20} color="#9CA3AF" />
+                      )}
                     </View>
 
                     <View style={styles.placeBody}>
@@ -228,8 +254,10 @@ export function SearchScreen({ navigation }: Props) {
                         {festival.title}
                       </Text>
                       <Text style={styles.placeDescription} numberOfLines={1}>
-                        {festival.region} {festival.district} ·{' '}
-                        {festival.startDate.replace(/-/g, '.')} 시작
+                        {festival.address || `${festival.region} ${festival.district}`}
+                        {festival.startDate
+                          ? ` · ${festival.startDate.replace(/-/g, '.')} 시작`
+                          : ''}
                       </Text>
                     </View>
                   </Pressable>
@@ -394,6 +422,11 @@ const styles = StyleSheet.create({
     backgroundColor: '#E5E7EB',
     alignItems: 'center',
     justifyContent: 'center',
+    overflow: 'hidden',
+  },
+  placeThumbImage: {
+    width: '100%',
+    height: '100%',
   },
   content: {
     paddingHorizontal: H_PADDING,

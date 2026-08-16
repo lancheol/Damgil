@@ -1,15 +1,24 @@
 import { Ionicons } from '@expo/vector-icons';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
-import { useMemo, useState } from 'react';
-import { FlatList, Image, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { useCallback, useEffect, useMemo, useState } from 'react';
+import {
+  ActivityIndicator,
+  FlatList,
+  Image,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  Text,
+  View,
+} from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { BackButton } from '../../components/common/BackButton';
 import { RegionFilterModal } from '../../components/festival/RegionFilterModal';
-import { FESTIVALS } from '../../constants/festivals';
 import { RootStackParamList } from '../../navigation/types';
 import { Festival, RegionSelection, regionSelectionKey } from '../../types/festival';
 import { colors } from '../../theme';
+import { loadFestivals, matchesFestivalRegion } from '../../utils/festivals';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'FestivalList'>;
 
@@ -23,16 +32,37 @@ const formatPeriod = (start: string, end: string) => {
 export function FestivalListScreen({ navigation }: Props) {
   const [selection, setSelection] = useState<RegionSelection[]>([]);
   const [filterOpen, setFilterOpen] = useState(false);
+  const [allFestivals, setAllFestivals] = useState<Festival[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
+  const [loadError, setLoadError] = useState(false);
+
+  const fetchFestivals = useCallback(async (force = false) => {
+    setLoadError(false);
+    try {
+      setAllFestivals(await loadFestivals(force));
+    } catch {
+      setLoadError(true);
+    }
+  }, []);
+
+  useEffect(() => {
+    void fetchFestivals().finally(() => setLoading(false));
+  }, [fetchFestivals]);
 
   const festivals = useMemo(() => {
     if (selection.length === 0) {
-      return FESTIVALS;
+      return allFestivals;
     }
-    const keys = new Set(selection.map(regionSelectionKey));
-    return FESTIVALS.filter((item) =>
-      keys.has(regionSelectionKey({ region: item.region, district: item.district })),
+    return allFestivals.filter((festival) =>
+      selection.some((item) => matchesFestivalRegion(festival, item)),
     );
-  }, [selection]);
+  }, [allFestivals, selection]);
+
+  const handleRefresh = useCallback(() => {
+    setRefreshing(true);
+    void fetchFestivals(true).finally(() => setRefreshing(false));
+  }, [fetchFestivals]);
 
   const removeSelection = (target: RegionSelection) => {
     const key = regionSelectionKey(target);
@@ -163,6 +193,8 @@ export function FestivalListScreen({ navigation }: Props) {
         renderItem={renderItem}
         contentContainerStyle={styles.listContent}
         showsVerticalScrollIndicator={false}
+        refreshing={refreshing}
+        onRefresh={handleRefresh}
         ListHeaderComponent={
           <View style={styles.summaryRow}>
             <Text style={styles.summaryLabel}>{`'${regionLabel}' 관련 행사 정보`}</Text>
@@ -171,7 +203,32 @@ export function FestivalListScreen({ navigation }: Props) {
         }
         ListEmptyComponent={
           <View style={styles.empty}>
-            <Text style={styles.emptyText}>해당 지역의 행사 정보가 아직 없어요.</Text>
+            {loading ? (
+              <ActivityIndicator color={colors.ink} />
+            ) : (
+              <>
+                <Text style={styles.emptyText}>
+                  {loadError
+                    ? '축제 정보를 불러오지 못했어요.'
+                    : '해당 지역의 행사 정보가 아직 없어요.'}
+                </Text>
+                {loadError ? (
+                  <Pressable
+                    accessibilityRole="button"
+                    onPress={() => {
+                      setLoading(true);
+                      void fetchFestivals(true).finally(() => setLoading(false));
+                    }}
+                    style={({ pressed }) => [
+                      styles.retryButton,
+                      pressed && styles.pressed,
+                    ]}
+                  >
+                    <Text style={styles.retryText}>다시 시도</Text>
+                  </Pressable>
+                ) : null}
+              </>
+            )}
           </View>
         }
       />
@@ -374,6 +431,18 @@ const styles = StyleSheet.create({
   emptyText: {
     fontSize: 13,
     color: '#99A1AF',
+  },
+  retryButton: {
+    marginTop: 14,
+    paddingHorizontal: 16,
+    paddingVertical: 9,
+    borderRadius: 999,
+    backgroundColor: colors.ink,
+  },
+  retryText: {
+    color: colors.white,
+    fontSize: 12,
+    fontWeight: '700',
   },
   pressed: {
     opacity: 0.85,
