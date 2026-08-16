@@ -13,18 +13,13 @@ type TabConfig = {
   iconFocused: keyof typeof Ionicons.glyphMap;
 };
 
+/** AI 탭은 일시 비활성 — 화면/스택 코드는 유지 */
 const TABS: TabConfig[] = [
   {
     routeName: 'Home',
     label: 'Home',
     icon: 'home-outline',
     iconFocused: 'home',
-  },
-  {
-    routeName: 'AI',
-    label: 'AI',
-    icon: 'sparkles-outline',
-    iconFocused: 'sparkles',
   },
   {
     routeName: 'Search',

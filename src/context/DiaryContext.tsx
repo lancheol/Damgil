@@ -289,23 +289,32 @@ export function DiaryProvider({ children }: PropsWithChildren) {
       return false;
     }
 
-    const tokens = await loadTokens();
-    if (!tokens?.access) {
-      Alert.alert('삭제 실패', '로그인이 필요합니다.');
-      return false;
-    }
+    // API 연동 전 로컬 id(예: diary-…)는 서버에 없음 → 기기에서만 제거
+    const isServerTripId = /^\d+$/.test(diaryId.trim());
 
-    try {
-      const result = await deleteTrip(tokens.access, diaryId);
-      if (!result.deleted) {
-        Alert.alert('삭제 실패', '다이어리를 삭제하지 못했어요.');
+    if (isServerTripId) {
+      const tokens = await loadTokens();
+      if (!tokens?.access) {
+        Alert.alert('삭제 실패', '로그인이 필요합니다.');
         return false;
       }
-    } catch (error) {
-      const message =
-        error instanceof ApiError ? error.message : '다이어리를 삭제하지 못했어요.';
-      Alert.alert('삭제 실패', message);
-      return false;
+
+      try {
+        const result = await deleteTrip(tokens.access, diaryId);
+        if (!result.deleted) {
+          Alert.alert('삭제 실패', '다이어리를 삭제하지 못했어요.');
+          return false;
+        }
+      } catch (error) {
+        // 이미 없거나 소프트삭제된 경우 로컬만 정리
+        const notFound = error instanceof ApiError && error.status === 404;
+        if (!notFound) {
+          const message =
+            error instanceof ApiError ? error.message : '다이어리를 삭제하지 못했어요.';
+          Alert.alert('삭제 실패', message);
+          return false;
+        }
+      }
     }
 
     hasMutatedRef.current = true;

@@ -50,7 +50,13 @@ export function SettingsScreen({}: Props) {
   const handleLogout = () => {
     Alert.alert('로그아웃', '정말 로그아웃할까요?', [
       { text: '취소', style: 'cancel' },
-      { text: '로그아웃', style: 'destructive', onPress: signOut },
+      {
+        text: '로그아웃',
+        style: 'destructive',
+        onPress: () => {
+          void signOut();
+        },
+      },
     ]);
   };
 

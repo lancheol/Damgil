@@ -25,6 +25,18 @@ export type TokenPair = {
   refresh: string;
 };
 
+export type LogoutScope = 'current_device' | 'all_devices';
+
+export type LogoutRequest = {
+  scope?: LogoutScope;
+  refreshToken?: string;
+};
+
+export type LogoutResponseDto = {
+  success: boolean;
+  scope: string;
+};
+
 export type ApiErrorBody = {
   code: string;
   message: string;

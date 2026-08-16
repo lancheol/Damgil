@@ -1,0 +1,46 @@
+---
+description: 여행기록(다이어리·미디어·꾸미기·표지·일자별 코스) API 연동 규칙
+alwaysApply: true
+---
+
+# Travel Record API (TR track)
+
+여행기록·다이어리 꾸미기·표지·미디어 API를 수정하기 전 반드시 운영 Swagger(`https://dam-gil.duckdns.org/docs-json`)를 다시 확인한다. 이 문서는 제품 흐름 참고용이며 불일치 시 **Swagger가 정본**이다. 엔드포인트나 타입을 추측하지 않는다.
+
+## Media (async first)
+
+- 순서: `POST /media/upload-url` → 클라이언트가 S3에 **직접 PUT** → `POST /media/:id/complete` → `GET /media/:id`로 status 확인.
+- `complete` 직후 `ready`가 아닐 수 있다. `pending`→`encoding`→`ready`/`failed`를 폴링하거나 로딩 UI를 둔다.
+- URL은 presigned GET(만료 있음). 필요 시 다시 조회한다. 원본 불변; crop은 `PATCH /media/:id/crop` 등 Swagger 경로를 따른다.
+
+## Trip / diary lifecycle
+
+- 경로 prefix: `/trips` (여행 = 다이어리).
+- `POST /trips` · `GET /trips/:id`(타임라인·mediaId) · `PUT /trips/:id` · `DELETE /trips/:id` · `GET /trips`.
+- `PATCH /trips/:id/status`: `recording`→`editing`→`completed`만 허용. `PATCH /trips/:id/end`는 status와 별개 — 쓰임은 Swagger 확인.
+- `DELETE /trips/:id`는 **소프트 삭제**(숨김·복구 가능). 목록/피드/공개조회에서 제외, 상세는 404. 계정 삭제(`DELETE /account`)와 혼동하지 않는다.
+- `regionIds`는 존재하지 않는 id를 조용히 무시할 수 있다.
+
+## Records & location
+
+- `POST /trips/:id/items`는 **ready** 미디어의 `mediaId`로 연결. 재시도 시 `Idempotency-Key` 권장.
+- 완성된 다이어리에서 기록 삭제 → `409` 가능.
+- 위치 확정: `PATCH /trips/:id/items/:itemId/location`. 자동매칭과 사용자 확정(`isManuallyEdited`)을 구분한다.
+- 장소는 PlaceCache/`contentId` 기준. 위치 미확정 기록은 일자별 코스에서 제외된다.
+
+## Cover, decoration, daily course
+
+- 표지: `PUT /trips/:id/cover` (대표 미디어·글꼴·스티커). 원본 미디어와 분리 저장.
+- 장소/기록 꾸미기: `PUT`/`GET /trips/:id/items/:itemId/decoration` — 재진입 시 GET으로 복원.
+- 일자별 코스: `GET /trips/:id/daily-course?day=N` — 기록 좌표 방문 순서. 추가/삭제/위치확정 시 서버가 재계산.
+
+## Visibility & public
+
+- `private` | `friends` | `public` (기본 private). friends는 현재 소유자만으로 취급할 수 있음.
+- 공개 조회: `GET /public/trips` · `GET /public/trips/:id` (비인증). public·미소프트삭제만.
+- 미디어: 본인 전부, 타인은 해당 다이어리가 public일 때만. 아니면 403.
+
+## Social & errors
+
+- 좋아요/댓글/피드는 Swagger 경로·페이지네이션을 따른다. 소프트삭제된 여행은 노출하지 않는다.
+- 에러는 `{ error: { code, message, detail } }` — `error.code`로 분기한다.

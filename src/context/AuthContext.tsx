@@ -8,7 +8,7 @@ import {
   useState,
 } from 'react';
 
-import { login as loginRequest, signup as signupRequest } from '../api/auth';
+import { login as loginRequest, logout as logoutRequest, signup as signupRequest } from '../api/auth';
 import { clearTokens, loadTokens, saveTokens } from '../api/tokenStorage';
 import { ApiError, AgreementsPayload, MeResponse } from '../api/types';
 import { getMe } from '../api/users';
@@ -44,7 +44,7 @@ type AuthContextValue = {
   signIn: (email: string, password: string) => Promise<void>;
   signUp: (payload: SignUpPayload) => Promise<void>;
   updateProfile: (input: UpdateProfileInput) => boolean;
-  signOut: () => void;
+  signOut: () => Promise<void>;
 };
 
 const DEFAULT_BIO = '매주 새로운 곳을 기록하는 다이어리 ✈️';
@@ -183,9 +183,21 @@ export function AuthProvider({ children }: PropsWithChildren) {
     return true;
   }, []);
 
-  const signOut = useCallback(() => {
+  const signOut = useCallback(async () => {
+    const tokens = await loadTokens();
+    if (tokens?.access) {
+      try {
+        // 설정 로그아웃: 이 기기 세션만 무효화 (MP — current_device + refreshToken)
+        await logoutRequest(tokens.access, {
+          scope: 'current_device',
+          refreshToken: tokens.refresh,
+        });
+      } catch {
+        // 서버 실패해도 로컬 세션은 정리
+      }
+    }
     setUser(null);
-    void clearTokens();
+    await clearTokens();
   }, []);
 
   const value = useMemo(
