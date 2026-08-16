@@ -1,4 +1,4 @@
-import { TripDto } from '../api/types';
+import { TripDto, TripListItemDto } from '../api/types';
 import { Diary } from '../types/diary';
 import { resolvePlaceNameFromAreaCode } from './tripRegions';
 import { toDiaryStatus } from './tripStatus';
@@ -7,9 +7,17 @@ function toDiaryVisibility(visibility: TripDto['visibility']): Diary['visibility
   return visibility === 'public' ? 'public' : 'private';
 }
 
-export async function mergeTripWithLocal(trip: TripDto, local?: Diary): Promise<Diary> {
+function isLegacyLocalDiaryId(diaryId: string): boolean {
+  return !/^\d+$/.test(diaryId);
+}
+
+export async function mergeTripWithLocal(
+  trip: TripListItemDto,
+  local?: Diary,
+): Promise<Diary> {
   const place =
     local?.place?.trim() ||
+    trip.regionName?.trim() ||
     (await resolvePlaceNameFromAreaCode(trip.areaCode)) ||
     '';
 
@@ -20,6 +28,11 @@ export async function mergeTripWithLocal(trip: TripDto, local?: Diary): Promise<
     createdAt: trip.startedAt,
     endedAt: trip.endedAt,
     status: toDiaryStatus(trip.status),
+    editStatus: trip.editStatus ?? local?.editStatus ?? null,
+    updatedAt: trip.updatedAt ?? local?.updatedAt ?? null,
+    likeCount: trip.likeCount ?? local?.likeCount ?? 0,
+    commentCount: trip.commentCount ?? local?.commentCount ?? 0,
+    coverThumbUrl: trip.coverThumbUrl ?? local?.coverThumbUrl ?? null,
     photos: local?.photos ?? [],
     cover: local?.cover ?? null,
     coverDraft: local?.coverDraft ?? null,
@@ -30,7 +43,7 @@ export async function mergeTripWithLocal(trip: TripDto, local?: Diary): Promise<
 }
 
 export async function mergeTripsWithLocal(
-  trips: TripDto[],
+  trips: TripListItemDto[],
   localDiaries: Diary[],
 ): Promise<Diary[]> {
   const localById = new Map(localDiaries.map((diary) => [diary.id, diary]));
@@ -40,6 +53,10 @@ export async function mergeTripsWithLocal(
     trips.map((trip) => mergeTripWithLocal(trip, localById.get(trip.id))),
   );
 
-  const orphanLocal = localDiaries.filter((diary) => !serverIds.has(diary.id));
+  // 전체 페이지를 모은 뒤: 레거시 diary-* 만 orphan으로 유지.
+  // 숫자 id인데 목록에 없으면 소프트삭제로 보고 로컬에서 제거한다.
+  const orphanLocal = localDiaries.filter(
+    (diary) => !serverIds.has(diary.id) && isLegacyLocalDiaryId(diary.id),
+  );
   return [...merged, ...orphanLocal];
 }

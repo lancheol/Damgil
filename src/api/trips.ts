@@ -2,15 +2,21 @@ import { apiRequest } from './http';
 import {
   AddTripItemRequest,
   AddTripItemResponseDto,
+  AutosaveEditorStateRequest,
+  AutosaveEditorStateResponseDto,
   ChangeTripStatusRequest,
   CreateTripRequest,
   DeletedResponseDto,
+  DiaryEditorStateListResponseDto,
+  PublishTripRequest,
   SetItemDecorationRequest,
   SetTripCoverRequest,
   TripDto,
   TripDailyCourseResponse,
   TripItemDecorationDto,
   TripItemDto,
+  TripListQuery,
+  TripListResponseDto,
   TripTimelineResponseDto,
   UpdateTripRequest,
 } from './types';
@@ -23,8 +29,18 @@ export function createTrip(accessToken: string, body: CreateTripRequest): Promis
   });
 }
 
-export function listTrips(accessToken: string): Promise<TripDto[]> {
-  return apiRequest<TripDto[]>('/trips', {
+export function listTrips(
+  accessToken: string,
+  query: TripListQuery = {},
+): Promise<TripListResponseDto> {
+  const params = new URLSearchParams();
+  if (query.editStatus) params.set('editStatus', query.editStatus);
+  if (query.sort) params.set('sort', query.sort);
+  if (query.page != null) params.set('page', String(query.page));
+  if (query.pageSize != null) params.set('pageSize', String(query.pageSize));
+  const suffix = params.toString() ? `?${params.toString()}` : '';
+
+  return apiRequest<TripListResponseDto>(`/trips${suffix}`, {
     accessToken,
   });
 }
@@ -160,5 +176,40 @@ export function getTripDailyCourse(
   const query = typeof day === 'number' && day >= 1 ? `?day=${day}` : '';
   return apiRequest<TripDailyCourseResponse>(`/trips/${tripId}/daily-course${query}`, {
     accessToken,
+  });
+}
+
+export function getTripEditorState(
+  accessToken: string,
+  tripId: string,
+): Promise<DiaryEditorStateListResponseDto> {
+  return apiRequest<DiaryEditorStateListResponseDto>(`/trips/${tripId}/editor`, {
+    accessToken,
+  });
+}
+
+export function autosaveTripEditorState(
+  accessToken: string,
+  tripId: string,
+  body: AutosaveEditorStateRequest,
+  idempotencyKey: string,
+): Promise<AutosaveEditorStateResponseDto> {
+  return apiRequest<AutosaveEditorStateResponseDto>(`/trips/${tripId}/editor/autosave`, {
+    method: 'POST',
+    accessToken,
+    body,
+    headers: { 'Idempotency-Key': idempotencyKey },
+  });
+}
+
+export function publishTrip(
+  accessToken: string,
+  tripId: string,
+  body: PublishTripRequest,
+): Promise<TripDto> {
+  return apiRequest<TripDto>(`/trips/${tripId}/publish`, {
+    method: 'PATCH',
+    accessToken,
+    body,
   });
 }

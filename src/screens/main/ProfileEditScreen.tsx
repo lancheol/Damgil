@@ -20,6 +20,7 @@ import { BackButton } from '../../components/common/BackButton';
 import { ProfileAvatar } from '../../components/mypage/ProfileAvatar';
 import { useAuth } from '../../context/AuthContext';
 import { RootStackParamList } from '../../navigation/types';
+import { ApiError } from '../../api/types';
 import { colors, radii, spacing, typography } from '../../theme';
 import {
   NICKNAME_MAX_LENGTH,
@@ -29,6 +30,7 @@ import {
 } from '../../utils/authValidation';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'ProfileEdit'>;
+const BIO_MAX_LENGTH = 500;
 
 export function ProfileEditScreen({ navigation }: Props) {
   const { user, updateProfile } = useAuth();
@@ -36,6 +38,7 @@ export function ProfileEditScreen({ navigation }: Props) {
   const [bio, setBio] = useState(user?.bio ?? '');
   const [avatarUri, setAvatarUri] = useState<string | null>(user?.avatarUri ?? null);
   const [usernameError, setUsernameError] = useState<string | undefined>();
+  const [saving, setSaving] = useState(false);
 
   const pickAvatar = async () => {
     const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
@@ -87,7 +90,11 @@ export function ProfileEditScreen({ navigation }: Props) {
     Alert.alert('프로필 사진', '사진을 어떻게 할까요?', buttons);
   };
 
-  const handleSave = () => {
+  const handleSave = async () => {
+    if (saving) {
+      return;
+    }
+
     const trimmed = normalizeNickname(username);
     if (!trimmed) {
       setUsernameError('사용자 이름을 입력해 주세요.');
@@ -98,12 +105,21 @@ export function ProfileEditScreen({ navigation }: Props) {
       return;
     }
 
-    const ok = updateProfile({ username: trimmed, bio, avatarUri });
-    if (!ok) {
-      Alert.alert('저장 실패', '프로필을 저장하지 못했어요.');
-      return;
+    setSaving(true);
+    try {
+      const ok = await updateProfile({ username: trimmed, bio, avatarUri });
+      if (!ok) {
+        Alert.alert('저장 실패', '프로필을 저장하지 못했어요.');
+        return;
+      }
+      navigation.goBack();
+    } catch (error) {
+      const message =
+        error instanceof ApiError ? error.message : '프로필을 저장하지 못했어요.';
+      Alert.alert('저장 실패', message);
+    } finally {
+      setSaving(false);
     }
-    navigation.goBack();
   };
 
   return (
@@ -117,10 +133,17 @@ export function ProfileEditScreen({ navigation }: Props) {
           <Text style={styles.headerTitle}>프로필 편집</Text>
           <Pressable
             accessibilityRole="button"
-            onPress={handleSave}
-            style={({ pressed }) => [styles.saveChip, pressed && styles.pressed]}
+            accessibilityState={{ disabled: saving }}
+            disabled={saving}
+            onPress={() => {
+              void handleSave();
+            }}
+            style={({ pressed }) => [
+              styles.saveChip,
+              (pressed || saving) && styles.pressed,
+            ]}
           >
-            <Text style={styles.saveChipText}>저장</Text>
+            <Text style={styles.saveChipText}>{saving ? '저장 중' : '저장'}</Text>
           </Pressable>
         </View>
 
@@ -177,9 +200,13 @@ export function ProfileEditScreen({ navigation }: Props) {
               placeholder="나를 소개해 주세요"
               placeholderTextColor={colors.placeholder}
               multiline
+              maxLength={BIO_MAX_LENGTH}
               style={[styles.input, styles.bioInput]}
               textAlignVertical="top"
             />
+            <Text style={styles.hint}>
+              {bio.length}/{BIO_MAX_LENGTH}
+            </Text>
           </View>
         </ScrollView>
       </KeyboardAvoidingView>

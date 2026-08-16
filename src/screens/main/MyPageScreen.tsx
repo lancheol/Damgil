@@ -49,7 +49,9 @@ export function MyPageScreen({ navigation }: Props) {
       [...diaries]
         .filter((diary) => Boolean(diary.endedAt))
         .sort(
-          (a, b) => new Date(b.endedAt ?? b.createdAt).getTime() - new Date(a.endedAt ?? a.createdAt).getTime(),
+          (a, b) =>
+            new Date(b.updatedAt ?? b.endedAt ?? b.createdAt).getTime() -
+            new Date(a.updatedAt ?? a.endedAt ?? a.createdAt).getTime(),
         ),
     [diaries],
   );
@@ -96,9 +98,10 @@ export function MyPageScreen({ navigation }: Props) {
 
   const renderDiaryCard = ({ item }: { item: Diary }) => {
     const cover = getEffectiveCover(item);
-    const likeCount = item.photos?.length ?? 0;
+    const likeCount = item.likeCount ?? 0;
     const title = cover.title?.trim() || item.name;
-    const isDraft = Boolean(item.coverDraft) && !item.cover;
+    const isDraft =
+      item.editStatus === 'DRAFT' || (Boolean(item.coverDraft) && !item.cover);
     const isPrivate = (item.visibility ?? 'private') === 'private';
 
     return (

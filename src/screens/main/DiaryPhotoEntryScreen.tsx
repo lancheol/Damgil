@@ -38,15 +38,13 @@ export function DiaryPhotoEntryScreen({ navigation, route }: Props) {
     mediaHeight,
     captureLandscape,
   } = route.params;
-  const { addPhotoToDiary, prepareTripPhotoLocation } = useDiaries();
+  const { addPhotoToDiary } = useDiaries();
   const [placeQuery, setPlaceQuery] = useState('');
   const [searching, setSearching] = useState(false);
   const [suggestions, setSuggestions] = useState<MapLocation[]>([]);
   const [dropdownOpen, setDropdownOpen] = useState(false);
   const [candidate, setCandidate] = useState<MapLocation | null>(null);
   const [confirmedLocation, setConfirmedLocation] = useState<MapLocation | null>(null);
-  const [serverItemId, setServerItemId] = useState<string | null>(null);
-  const [confirmingLocation, setConfirmingLocation] = useState(false);
   const [rejectHint, setRejectHint] = useState(false);
   const searchSeqRef = useRef(0);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -102,7 +100,6 @@ export function DiaryPhotoEntryScreen({ navigation, route }: Props) {
     setPlaceQuery(text);
     setConfirmedLocation(null);
     setCandidate(null);
-    setServerItemId(null);
     setRejectHint(false);
     if (!text.trim()) {
       setSuggestions([]);
@@ -155,7 +152,6 @@ export function DiaryPhotoEntryScreen({ navigation, route }: Props) {
     setSuggestions([]);
     setDropdownOpen(false);
     setConfirmedLocation(null);
-    setServerItemId(null);
     setRejectHint(false);
     setCandidate(location);
   };
@@ -170,40 +166,19 @@ export function DiaryPhotoEntryScreen({ navigation, route }: Props) {
       return;
     }
 
-    void (async () => {
-      setConfirmingLocation(true);
-      try {
-        const prepared = await prepareTripPhotoLocation({
-          diaryId,
-          mediaType,
-          latitude: candidate.latitude,
-          longitude: candidate.longitude,
-          placeName: candidate.name,
-          placeContentId,
-          serverItemId,
-        });
-        if (!prepared) {
-          return;
-        }
-
-        setServerItemId(prepared.serverItemId);
-        setRejectHint(false);
-        setConfirmedLocation({
-          name: prepared.placeName || candidate.name,
-          latitude: prepared.latitude,
-          longitude: prepared.longitude,
-          contentId: prepared.placeContentId,
-        });
-      } finally {
-        setConfirmingLocation(false);
-      }
-    })();
+    // 실제 item 생성·위치 확정은 저장 시 mediaId와 함께 한 번에 수행
+    setRejectHint(false);
+    setConfirmedLocation({
+      name: candidate.name,
+      latitude: candidate.latitude,
+      longitude: candidate.longitude,
+      contentId: placeContentId,
+    });
   };
 
   const handleRejectLocation = () => {
     setCandidate(null);
     setConfirmedLocation(null);
-    setServerItemId(null);
     setPlaceQuery('');
     setSuggestions([]);
     setDropdownOpen(false);
@@ -233,7 +208,6 @@ export function DiaryPhotoEntryScreen({ navigation, route }: Props) {
         latitude: confirmedLocation.latitude,
         longitude: confirmedLocation.longitude,
         placeContentId: confirmedLocation.contentId,
-        serverItemId,
       });
 
       if (!saved) {
@@ -369,31 +343,25 @@ export function DiaryPhotoEntryScreen({ navigation, route }: Props) {
                   <View style={styles.confirmActions}>
                     <Pressable
                       accessibilityRole="button"
-                      disabled={confirmingLocation}
                       onPress={handleRejectLocation}
                       style={({ pressed }) => [
                         styles.choiceButton,
                         styles.noButton,
-                        (pressed || confirmingLocation) && styles.pressed,
+                        pressed && styles.pressed,
                       ]}
                     >
                       <Text style={styles.choiceButtonText}>아니오</Text>
                     </Pressable>
                     <Pressable
                       accessibilityRole="button"
-                      disabled={confirmingLocation}
                       onPress={handleConfirmLocation}
                       style={({ pressed }) => [
                         styles.choiceButton,
                         styles.yesButton,
-                        (pressed || confirmingLocation) && styles.pressed,
+                        pressed && styles.pressed,
                       ]}
                     >
-                      {confirmingLocation ? (
-                        <ActivityIndicator size="small" color={colors.white} />
-                      ) : (
-                        <Text style={styles.choiceButtonText}>예</Text>
-                      )}
+                      <Text style={styles.choiceButtonText}>예</Text>
                     </Pressable>
                   </View>
                 </View>

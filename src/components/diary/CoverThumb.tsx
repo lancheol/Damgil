@@ -1,5 +1,5 @@
 import { useMemo } from 'react';
-import { StyleSheet, View, ViewStyle } from 'react-native';
+import { Image, StyleSheet, View, ViewStyle } from 'react-native';
 
 import { CoverCanvas } from './CoverCanvas';
 import { Diary, DiaryPhoto } from '../../types/diary';
@@ -13,7 +13,13 @@ type CoverThumbProps = {
 
 export function CoverThumb({ diary, style, fill = true }: CoverThumbProps) {
   const cover = getEffectiveCover(diary);
-  const photos = diary?.photos ?? [];
+  const photos = useMemo(() => diary?.photos ?? [], [diary?.photos]);
+  const hasLocalCoverVisual =
+    Boolean(cover.photos?.length) ||
+    Boolean(cover.stickers?.length) ||
+    Boolean(cover.texts?.length) ||
+    photos.some((photo) => Boolean(photo.uri));
+  const remoteThumb = diary?.coverThumbUrl?.trim() || null;
 
   const photoById = useMemo(() => {
     const map: Record<string, DiaryPhoto | undefined> = {};
@@ -22,6 +28,14 @@ export function CoverThumb({ diary, style, fill = true }: CoverThumbProps) {
     }
     return map;
   }, [photos]);
+
+  if (!hasLocalCoverVisual && remoteThumb) {
+    return (
+      <View style={[styles.root, style]}>
+        <Image source={{ uri: remoteThumb }} style={styles.remoteThumb} resizeMode="cover" />
+      </View>
+    );
+  }
 
   return (
     <View style={[styles.root, style]}>
@@ -51,5 +65,9 @@ const styles = StyleSheet.create({
   root: {
     flex: 1,
     overflow: 'hidden',
+  },
+  remoteThumb: {
+    width: '100%',
+    height: '100%',
   },
 });

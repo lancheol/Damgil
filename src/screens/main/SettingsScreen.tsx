@@ -7,6 +7,9 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { BackButton } from '../../components/common/BackButton';
 import { TermsBody } from '../../components/common/TermsBody';
 import { TERMS_CONTENT } from '../../constants/terms';
+import { getAccountDeletionPreview } from '../../api/account';
+import { loadTokens } from '../../api/tokenStorage';
+import { ApiError } from '../../api/types';
 import { useAuth } from '../../context/AuthContext';
 import type { RootStackParamList, TermsType } from '../../navigation/types';
 import { colors, radii, spacing } from '../../theme';
@@ -34,10 +37,22 @@ const MUTED = '#6A7282';
 const TITLE = '#1E2939';
 const BORDER = '#F3F4F6';
 
+function formatDeletionPreviewMessage(willDelete: Record<string, number>): string {
+  const parts = Object.entries(willDelete)
+    .filter(([, count]) => typeof count === 'number' && count > 0)
+    .map(([key, count]) => `${key} ${count}건`);
+
+  if (parts.length === 0) {
+    return '탈퇴하면 계정과 관련 데이터가 삭제되며 되돌릴 수 없습니다.';
+  }
+  return `삭제 예정: ${parts.join(', ')}\n탈퇴하면 되돌릴 수 없습니다.`;
+}
+
 export function SettingsScreen({}: Props) {
   const insets = useSafeAreaInsets();
-  const { signOut } = useAuth();
+  const { signOut, deleteAccount } = useAuth();
   const [terms, setTerms] = useState<TermsType | null>(null);
+  const [withdrawBusy, setWithdrawBusy] = useState(false);
 
   const handleItemPress = (item: SettingsItem) => {
     if (item.terms) {
@@ -60,11 +75,69 @@ export function SettingsScreen({}: Props) {
     ]);
   };
 
-  const handleWithdraw = () => {
-    Alert.alert('회원탈퇴', '탈퇴하면 기록한 다이어리와 사진이 모두 사라집니다.', [
+  const confirmWithdraw = () => {
+    if (withdrawBusy) {
+      return;
+    }
+    Alert.alert('회원탈퇴 확정', '정말 탈퇴할까요? 이 작업은 취소할 수 없습니다.', [
       { text: '취소', style: 'cancel' },
-      { text: '탈퇴', style: 'destructive', onPress: signOut },
+      {
+        text: '탈퇴',
+        style: 'destructive',
+        onPress: () => {
+          void (async () => {
+            setWithdrawBusy(true);
+            try {
+              await deleteAccount();
+              Alert.alert('탈퇴 완료', '계정이 삭제되었습니다.');
+            } catch (error) {
+              const message =
+                error instanceof ApiError
+                  ? error.message
+                  : '회원탈퇴를 완료하지 못했어요.';
+              Alert.alert('탈퇴 실패', message);
+            } finally {
+              setWithdrawBusy(false);
+            }
+          })();
+        },
+      },
     ]);
+  };
+
+  const handleWithdraw = () => {
+    if (withdrawBusy) {
+      return;
+    }
+
+    void (async () => {
+      setWithdrawBusy(true);
+      try {
+        const tokens = await loadTokens();
+        if (!tokens?.access) {
+          Alert.alert('탈퇴 실패', '로그인이 필요합니다.');
+          return;
+        }
+
+        const preview = await getAccountDeletionPreview(tokens.access);
+        Alert.alert('회원탈퇴', formatDeletionPreviewMessage(preview.willDelete), [
+          { text: '취소', style: 'cancel' },
+          {
+            text: '계속',
+            style: 'destructive',
+            onPress: confirmWithdraw,
+          },
+        ]);
+      } catch (error) {
+        const message =
+          error instanceof ApiError
+            ? error.message
+            : '탈퇴 안내를 불러오지 못했어요.';
+        Alert.alert('탈퇴 실패', message);
+      } finally {
+        setWithdrawBusy(false);
+      }
+    })();
   };
 
   return (
@@ -112,11 +185,18 @@ export function SettingsScreen({}: Props) {
 
           <Pressable
             onPress={handleWithdraw}
-            style={({ pressed }) => [styles.accountButton, pressed && styles.pressed]}
+            disabled={withdrawBusy}
+            style={({ pressed }) => [
+              styles.accountButton,
+              (pressed || withdrawBusy) && styles.pressed,
+            ]}
             accessibilityRole="button"
             accessibilityLabel="회원탈퇴"
+            accessibilityState={{ disabled: withdrawBusy }}
           >
-            <Text style={styles.withdrawText}>회원탈퇴</Text>
+            <Text style={styles.withdrawText}>
+              {withdrawBusy ? '처리 중…' : '회원탈퇴'}
+            </Text>
           </Pressable>
         </View>
       </ScrollView>

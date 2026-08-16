@@ -13,6 +13,7 @@ import { Alert } from 'react-native';
 
 import {
   addTripItem,
+  autosaveTripEditorState,
   confirmTripItemLocation,
   createTrip,
   changeTripStatus,
@@ -21,13 +22,16 @@ import {
   endTrip,
   getTripTimeline,
   listTrips,
+  publishTrip,
   setTripCover,
   setTripItemDecoration,
   getTripItemDecoration,
+  getTripEditorState,
   updateTrip,
 } from '../api/trips';
+import { getMediaDisplayUri, setMediaCrop, uploadMediaFile } from '../api/media';
 import { loadTokens } from '../api/tokenStorage';
-import { ApiError, TripStatus } from '../api/types';
+import { ApiError, TripListItemDto, TripStatus } from '../api/types';
 import { useAuth } from './AuthContext';
 import {
   AddDiaryPhotoInput,
@@ -50,26 +54,13 @@ import { mergeTripsWithLocal } from '../utils/tripMapper';
 import { applyTimelineToDiary } from '../utils/tripItemMapper';
 import { photoDecorationFromItemDto } from '../utils/tripItemDecoration';
 import { toDiaryStatus } from '../utils/tripStatus';
+import {
+  applyEditorDaysToDiary,
+  buildEditorStateForDay,
+  dayNumberForPlace,
+} from '../utils/tripEditorMapper';
 
 const DIARIES_STORAGE_KEY = '@damgil/diaries/v1';
-
-type PrepareTripPhotoLocationInput = {
-  diaryId: string;
-  mediaType?: Diary['photos'][number]['mediaType'];
-  latitude: number;
-  longitude: number;
-  placeName?: string | null;
-  placeContentId: string;
-  serverItemId?: string | null;
-};
-
-type PrepareTripPhotoLocationResult = {
-  serverItemId: string;
-  latitude: number;
-  longitude: number;
-  placeName: string | null;
-  placeContentId: string;
-};
 
 type DiaryContextValue = {
   diaries: Diary[];
@@ -78,9 +69,6 @@ type DiaryContextValue = {
   createDiary: (input: CreateDiaryInput) => Promise<Diary>;
   deleteDiary: (diaryId: string) => Promise<boolean>;
   addPhotoToDiary: (input: AddDiaryPhotoInput) => Promise<DiaryPhoto | null>;
-  prepareTripPhotoLocation: (
-    input: PrepareTripPhotoLocationInput,
-  ) => Promise<PrepareTripPhotoLocationResult | null>;
   removePhotosFromDiary: (diaryId: string, photoIds: string[]) => Promise<boolean>;
   endDiary: (diaryId: string) => Promise<boolean>;
   completeDiary: (diaryId: string) => Promise<boolean>;
@@ -93,9 +81,10 @@ type DiaryContextValue = {
   savePhotoDecoration: (input: SavePhotoDecorationInput) => Promise<boolean>;
   loadPhotoDecoration: (diaryId: string, photoId: string) => Promise<PhotoDecoration | null>;
   savePlaceSelections: (input: SavePlaceSelectionsInput) => boolean;
-  savePlacePageDecoration: (input: SavePlacePageDecorationInput) => boolean;
+  savePlacePageDecoration: (input: SavePlacePageDecorationInput) => Promise<boolean>;
   getDiaryById: (diaryId: string) => Diary | undefined;
   syncDiaryTimeline: (diaryId: string) => Promise<boolean>;
+  syncDiaryEditor: (diaryId: string) => Promise<boolean>;
 };
 
 const DiaryContext = createContext<DiaryContextValue | null>(null);
@@ -128,6 +117,11 @@ function normalizeDiary(diary: Diary): Diary {
       diary.status ?? (diary.endedAt ? 'editing' : 'recording'),
     ),
     visibility: diary.visibility ?? 'private',
+    editStatus: diary.editStatus ?? null,
+    updatedAt: diary.updatedAt ?? null,
+    likeCount: diary.likeCount ?? 0,
+    commentCount: diary.commentCount ?? 0,
+    coverThumbUrl: diary.coverThumbUrl ?? null,
     placesSetupAt: diary.placesSetupAt ?? null,
     placeSelections: Array.isArray(diary.placeSelections)
       ? diary.placeSelections.map((selection) => ({
@@ -155,7 +149,7 @@ function normalizeDiary(diary: Diary): Diary {
 }
 
 function isActiveDiary(diary: Diary): boolean {
-  return !diary.endedAt;
+  return !diary.endedAt && toDiaryStatus(diary.status) === 'recording';
 }
 
 function withUpdatedAt(cover: Omit<DiaryCover, 'updatedAt'> | DiaryCover): DiaryCover {
@@ -174,6 +168,7 @@ export function DiaryProvider({ children }: PropsWithChildren) {
   const [diaries, setDiaries] = useState<Diary[]>([]);
   const [isReady, setIsReady] = useState(false);
   const hasMutatedRef = useRef(false);
+  const editorRevisionsRef = useRef(new Map<string, number>());
 
   const loadDiaries = useCallback(async () => {
     let localDiaries: Diary[] = [];
@@ -204,7 +199,19 @@ export function DiaryProvider({ children }: PropsWithChildren) {
     }
 
     try {
-      const trips = await listTrips(tokens.access);
+      const trips: TripListItemDto[] = [];
+      let page = 1;
+      let hasNext = true;
+      while (hasNext) {
+        const result = await listTrips(tokens.access, {
+          sort: 'updated',
+          page,
+          pageSize: 20,
+        });
+        trips.push(...result.items);
+        hasNext = result.hasNext;
+        page += 1;
+      }
       if (hasMutatedRef.current) {
         return localDiaries;
       }
@@ -322,82 +329,6 @@ export function DiaryProvider({ children }: PropsWithChildren) {
     return true;
   }, [diaries]);
 
-  const prepareTripPhotoLocation = useCallback(
-    async (input: PrepareTripPhotoLocationInput) => {
-      const target = diaries.find((diary) => diary.id === input.diaryId);
-      if (!target || target.endedAt) {
-        Alert.alert('위치 확정 실패', '진행 중인 여행에서만 위치를 확정할 수 있어요.');
-        return null;
-      }
-
-      const placeContentId = input.placeContentId.trim();
-      if (!placeContentId) {
-        Alert.alert('위치 확정 실패', '장소 정보가 없어 확정할 수 없어요. 다시 검색해 주세요.');
-        return null;
-      }
-
-      const tokens = await loadTokens();
-      if (!tokens?.access) {
-        Alert.alert('위치 확정 실패', '로그인이 필요합니다.');
-        return null;
-      }
-
-      const mediaType = input.mediaType ?? 'photo';
-      const placeName = input.placeName?.trim() || null;
-      let serverItemId = input.serverItemId?.trim() || '';
-      let latitude = input.latitude;
-      let longitude = input.longitude;
-
-      try {
-        if (!serverItemId) {
-          const clientKey = createId('item');
-          const item = await addTripItem(
-            tokens.access,
-            input.diaryId,
-            {
-              kind: mediaType === 'video' ? 'video' : 'photo',
-              capturedAt: new Date().toISOString(),
-              lat: latitude,
-              lng: longitude,
-              ...(placeName ? { note: placeName.slice(0, 1000) } : {}),
-              clientKey,
-            },
-            clientKey,
-          );
-          serverItemId = item.id;
-          if (typeof item.lat === 'number') {
-            latitude = item.lat;
-          }
-          if (typeof item.lng === 'number') {
-            longitude = item.lng;
-          }
-        }
-
-        const confirmed = await confirmTripItemLocation(
-          tokens.access,
-          input.diaryId,
-          serverItemId,
-          placeContentId,
-        );
-
-        return {
-          serverItemId: confirmed.id || serverItemId,
-          // 선택한 TourAPI 장소 좌표를 유지 (서버 item GPS가 stub/오차여도 덮지 않음)
-          latitude,
-          longitude,
-          placeName: placeName || confirmed.note?.trim() || null,
-          placeContentId: confirmed.confirmedPlaceContentId || placeContentId,
-        };
-      } catch (error) {
-        const message =
-          error instanceof ApiError ? error.message : '촬영 위치를 확정하지 못했어요.';
-        Alert.alert('위치 확정 실패', message);
-        return null;
-      }
-    },
-    [diaries],
-  );
-
   const addPhotoToDiary = useCallback(
     async (input: AddDiaryPhotoInput) => {
       const target = diaries.find((diary) => diary.id === input.diaryId);
@@ -419,18 +350,18 @@ export function DiaryProvider({ children }: PropsWithChildren) {
       const mediaType = input.mediaType ?? 'photo';
       const capturedAt = new Date().toISOString();
       const clientKey = createId('item');
-      let photoId = input.serverItemId?.trim() || createId('photo');
+      let photoId = createId('photo');
       let placeName = input.placeName?.trim() || null;
       let note = input.note?.trim() || '';
       let latitude = input.latitude;
       let longitude = input.longitude;
       let createdAt = capturedAt;
+      let mediaId: string | null = null;
 
-      // 이미 위치 확정까지 끝난 서버 기록이 있으면 재생성하지 않음
-      const alreadySynced = Boolean(input.serverItemId?.trim());
-      const shouldSyncRemote = !input.allowAfterEnd && !target.endedAt && !alreadySynced;
+      const isServerTrip = /^\d+$/.test(input.diaryId);
+      const shouldSyncRemote = isServerTrip && !input.allowAfterEnd && !target.endedAt;
 
-      if (shouldSyncRemote) {
+      if (isServerTrip) {
         const tokens = await loadTokens();
         if (!tokens?.access) {
           Alert.alert('저장 실패', '로그인이 필요합니다.');
@@ -438,51 +369,57 @@ export function DiaryProvider({ children }: PropsWithChildren) {
         }
 
         try {
-          const item = await addTripItem(
-            tokens.access,
-            input.diaryId,
-            {
-              kind: mediaType === 'video' ? 'video' : 'photo',
-              capturedAt,
-              lat: latitude,
-              lng: longitude,
-              ...(placeName || note
-                ? { note: (note || placeName || '').slice(0, 1000) }
-                : {}),
-              clientKey,
-            },
-            clientKey,
-          );
-          photoId = item.id;
-          createdAt = item.capturedAt || capturedAt;
-          if (typeof item.lat === 'number') {
-            latitude = item.lat;
-          }
-          if (typeof item.lng === 'number') {
-            longitude = item.lng;
-          }
-          if (item.matchedPlace?.title?.trim()) {
-            placeName = placeName || item.matchedPlace.title.trim();
-          }
-          if (item.note?.trim()) {
-            note = item.note.trim();
-          }
+          const uploaded = await uploadMediaFile(tokens.access, {
+            uri: input.uri,
+            kind: mediaType === 'video' ? 'video' : 'photo',
+            sourceType: input.allowAfterEnd ? 'gallery_upload' : 'trip_record',
+            tripId: input.diaryId,
+          });
+          mediaId = uploaded.mediaId;
 
-          const placeContentId = input.placeContentId?.trim();
-          if (placeContentId) {
-            const confirmed = await confirmTripItemLocation(
+          if (shouldSyncRemote) {
+            const item = await addTripItem(
               tokens.access,
               input.diaryId,
-              photoId,
-              placeContentId,
+              {
+                kind: mediaType === 'video' ? 'video' : 'photo',
+                capturedAt,
+                lat: latitude,
+                lng: longitude,
+                mediaId: Number(mediaId),
+                ...(placeName || note
+                  ? { note: (note || placeName || '').slice(0, 1000) }
+                  : {}),
+                clientKey,
+              },
+              clientKey,
             );
-            // 확정은 contentId 기록용. 지도 좌표는 검색에서 고른 TourAPI 값을 유지
-            if (!input.latitude && typeof confirmed.lat === 'number') {
-              latitude = confirmed.lat;
+            photoId = item.id;
+            createdAt = item.capturedAt || capturedAt;
+            if (typeof item.lat === 'number') {
+              latitude = item.lat;
             }
-            if (!input.longitude && typeof confirmed.lng === 'number') {
-              longitude = confirmed.lng;
+            if (typeof item.lng === 'number') {
+              longitude = item.lng;
             }
+            if (item.matchedPlace?.title?.trim()) {
+              placeName = placeName || item.matchedPlace.title.trim();
+            }
+            if (item.note?.trim()) {
+              note = item.note.trim();
+            }
+
+            const placeContentId = input.placeContentId?.trim();
+            if (placeContentId) {
+              await confirmTripItemLocation(
+                tokens.access,
+                input.diaryId,
+                photoId,
+                placeContentId,
+              );
+            }
+          } else if (input.allowAfterEnd) {
+            photoId = `media-${mediaId}`;
           }
         } catch (error) {
           const message =
@@ -496,6 +433,7 @@ export function DiaryProvider({ children }: PropsWithChildren) {
         id: photoId,
         uri: input.uri,
         mediaType,
+        mediaId,
         placeName,
         note,
         latitude,
@@ -674,8 +612,8 @@ export function DiaryProvider({ children }: PropsWithChildren) {
       }
 
       try {
-        const trip = await changeTripStatus(tokens.access, diaryId, {
-          status: 'completed',
+        const trip = await publishTrip(tokens.access, diaryId, {
+          visibility: target.visibility === 'public' ? 'public' : 'private',
         });
         const status = toDiaryStatus(trip.status);
         hasMutatedRef.current = true;
@@ -693,16 +631,6 @@ export function DiaryProvider({ children }: PropsWithChildren) {
         );
         return true;
       } catch (error) {
-        if (error instanceof ApiError && error.status === 409) {
-          // 이미 completed 등 허용되지 않는 전이면 로컬만 맞춤
-          hasMutatedRef.current = true;
-          setDiaries((prev) =>
-            prev.map((diary) =>
-              diary.id === diaryId ? { ...diary, status: 'completed' } : diary,
-            ),
-          );
-          return true;
-        }
         const message =
           error instanceof ApiError ? error.message : '여행 완료 처리에 실패했어요.';
         Alert.alert('완료 실패', message);
@@ -722,6 +650,7 @@ export function DiaryProvider({ children }: PropsWithChildren) {
       const nextCover = withUpdatedAt(input.cover);
       const nextTitle = nextCover.title.trim() || target.name;
       const titleChanged = nextTitle !== target.name.trim();
+      let resolvedCoverMediaId: string | null = null;
 
       if (input.mode === 'save') {
         const tokens = await loadTokens();
@@ -731,12 +660,28 @@ export function DiaryProvider({ children }: PropsWithChildren) {
         }
 
         try {
+          const coverPhoto = nextCover.coverPhotoId
+            ? target.photos.find((photo) => photo.id === nextCover.coverPhotoId)
+            : null;
+          resolvedCoverMediaId = coverPhoto?.mediaId ?? null;
+          if (coverPhoto && !resolvedCoverMediaId && /^\d+$/.test(input.diaryId)) {
+            const uploaded = await uploadMediaFile(tokens.access, {
+              uri: coverPhoto.uri,
+              kind: coverPhoto.mediaType === 'video' ? 'video' : 'photo',
+              sourceType: 'gallery_upload',
+              tripId: input.diaryId,
+            });
+            resolvedCoverMediaId = uploaded.mediaId;
+          }
+
           if (titleChanged) {
             await updateTrip(tokens.access, input.diaryId, { title: nextTitle });
           }
 
-          // coverMediaId는 업로드된 media id — 아직 미연동이라 생략
           await setTripCover(tokens.access, input.diaryId, {
+            ...(resolvedCoverMediaId
+              ? { coverMediaId: Number(resolvedCoverMediaId) }
+              : {}),
             titleFont: String(nextCover.fontId).slice(0, 50),
             stickerLayout: {
               title: nextCover.title,
@@ -781,6 +726,13 @@ export function DiaryProvider({ children }: PropsWithChildren) {
             cover: nextCover,
             coverDraft: null,
             visibility: diary.visibility ?? 'private',
+            photos: resolvedCoverMediaId
+              ? diary.photos.map((photo) =>
+                  photo.id === nextCover.coverPhotoId
+                    ? { ...photo, mediaId: resolvedCoverMediaId }
+                    : photo,
+                )
+              : diary.photos,
           };
         }),
       );
@@ -996,7 +948,7 @@ export function DiaryProvider({ children }: PropsWithChildren) {
   );
 
   const savePlacePageDecoration = useCallback(
-    (input: SavePlacePageDecorationInput) => {
+    async (input: SavePlacePageDecorationInput) => {
       const target = diaries.find((diary) => diary.id === input.diaryId);
       if (!target) {
         return false;
@@ -1013,6 +965,12 @@ export function DiaryProvider({ children }: PropsWithChildren) {
         stickers: input.decoration.stickers ?? [],
         texts: input.decoration.texts ?? [],
       });
+      const nextDiary: Diary = {
+        ...target,
+        placeSelections: (target.placeSelections ?? []).map((place) =>
+          place.id === input.placeId ? { ...place, pageDecoration: next } : place,
+        ),
+      };
 
       hasMutatedRef.current = true;
       setDiaries((prev) =>
@@ -1032,6 +990,99 @@ export function DiaryProvider({ children }: PropsWithChildren) {
             : diary,
         ),
       );
+
+      if (!/^\d+$/.test(input.diaryId)) {
+        return true;
+      }
+
+      const dayNumber = dayNumberForPlace(nextDiary, input.placeId);
+      if (!dayNumber) {
+        Alert.alert('저장 실패', '이 장소가 속한 여행 일차를 찾지 못했어요.');
+        return false;
+      }
+
+      const tokens = await loadTokens();
+      if (!tokens?.access) {
+        Alert.alert('저장 실패', '로그인이 필요합니다.');
+        return false;
+      }
+
+      try {
+        const revisionKey = `${input.diaryId}:${dayNumber}`;
+        let revision = editorRevisionsRef.current.get(revisionKey);
+        if (revision == null) {
+          const remote = await getTripEditorState(tokens.access, input.diaryId);
+          remote.days.forEach((day) => {
+            editorRevisionsRef.current.set(
+              `${input.diaryId}:${day.dayNumber}`,
+              day.revision,
+            );
+          });
+          revision = editorRevisionsRef.current.get(revisionKey) ?? 0;
+        }
+
+        await Promise.all(
+          next.photos.map(async (layer) => {
+            const mediaId = nextDiary.photos.find(
+              (photo) => photo.id === layer.photoId,
+            )?.mediaId;
+            if (!mediaId || !layer.cropRect) return;
+            await setMediaCrop(tokens.access, mediaId, {
+              ...layer.cropRect,
+              scale: layer.scale,
+              rotation: layer.rotation,
+            });
+          }),
+        );
+
+        const saved = await autosaveTripEditorState(
+          tokens.access,
+          input.diaryId,
+          {
+            dayNumber,
+            revision,
+            editorState: buildEditorStateForDay(nextDiary, dayNumber),
+          },
+          createId('editor-save'),
+        );
+        editorRevisionsRef.current.set(revisionKey, saved.revision);
+      } catch (error) {
+        if (
+          error instanceof ApiError &&
+          (error.code === 'EDITOR_STATE_CONFLICT' || error.code === 'DIARY_COMPLETED')
+        ) {
+          const message =
+            error.code === 'DIARY_COMPLETED'
+              ? '완료된 다이어리는 더 이상 편집할 수 없어요.'
+              : '다른 기기에서 변경된 내용을 불러왔어요. 다시 편집해 주세요.';
+          if (error.code === 'EDITOR_STATE_CONFLICT') {
+            try {
+              const remote = await getTripEditorState(tokens.access, input.diaryId);
+              remote.days.forEach((day) => {
+                editorRevisionsRef.current.set(
+                  `${input.diaryId}:${day.dayNumber}`,
+                  day.revision,
+                );
+              });
+              setDiaries((prev) =>
+                prev.map((diary) =>
+                  diary.id === input.diaryId
+                    ? applyEditorDaysToDiary(diary, remote.days)
+                    : diary,
+                ),
+              );
+            } catch {
+              // 원래 충돌 안내를 유지한다.
+            }
+          }
+          Alert.alert('저장 충돌', message);
+          return false;
+        }
+        const message =
+          error instanceof ApiError ? error.message : '편집 내용을 서버에 저장하지 못했어요.';
+        Alert.alert('저장 실패', message);
+        return false;
+      }
       return true;
     },
     [diaries],
@@ -1050,15 +1101,50 @@ export function DiaryProvider({ children }: PropsWithChildren) {
 
     try {
       const timeline = await getTripTimeline(tokens.access, diaryId);
+      const mediaEntries = await Promise.all(
+        timeline.items.map(async (item) => {
+          if (!item.mediaId) return [item.id, null] as const;
+          try {
+            return [
+              item.id,
+              await getMediaDisplayUri(tokens.access, item.mediaId),
+            ] as const;
+          } catch {
+            return [item.id, null] as const;
+          }
+        }),
+      );
+      const mediaUrisByItemId = Object.fromEntries(mediaEntries);
       hasMutatedRef.current = true;
       setDiaries((prev) => {
         const local = prev.find((diary) => diary.id === diaryId);
         if (!local) {
           return prev;
         }
-        const updated = applyTimelineToDiary(timeline, local);
+        const updated = applyTimelineToDiary(timeline, local, mediaUrisByItemId);
         return prev.map((diary) => (diary.id === diaryId ? normalizeDiary(updated) : diary));
       });
+      return true;
+    } catch {
+      return false;
+    }
+  }, []);
+
+  const syncDiaryEditor = useCallback(async (diaryId: string) => {
+    if (!/^\d+$/.test(diaryId)) return true;
+    const tokens = await loadTokens();
+    if (!tokens?.access) return false;
+
+    try {
+      const remote = await getTripEditorState(tokens.access, diaryId);
+      remote.days.forEach((day) => {
+        editorRevisionsRef.current.set(`${diaryId}:${day.dayNumber}`, day.revision);
+      });
+      setDiaries((prev) =>
+        prev.map((diary) =>
+          diary.id === diaryId ? applyEditorDaysToDiary(diary, remote.days) : diary,
+        ),
+      );
       return true;
     } catch {
       return false;
@@ -1075,7 +1161,6 @@ export function DiaryProvider({ children }: PropsWithChildren) {
       createDiary,
       deleteDiary,
       addPhotoToDiary,
-      prepareTripPhotoLocation,
       removePhotosFromDiary,
       endDiary,
       completeDiary,
@@ -1088,6 +1173,7 @@ export function DiaryProvider({ children }: PropsWithChildren) {
       savePlacePageDecoration,
       getDiaryById,
       syncDiaryTimeline,
+      syncDiaryEditor,
     }),
     [
       diaries,
@@ -1096,7 +1182,6 @@ export function DiaryProvider({ children }: PropsWithChildren) {
       createDiary,
       deleteDiary,
       addPhotoToDiary,
-      prepareTripPhotoLocation,
       removePhotosFromDiary,
       endDiary,
       completeDiary,
@@ -1109,6 +1194,7 @@ export function DiaryProvider({ children }: PropsWithChildren) {
       savePlacePageDecoration,
       getDiaryById,
       syncDiaryTimeline,
+      syncDiaryEditor,
     ],
   );
 

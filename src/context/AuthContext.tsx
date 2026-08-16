@@ -8,10 +8,11 @@ import {
   useState,
 } from 'react';
 
+import { deleteAccount as deleteAccountRequest } from '../api/account';
 import { login as loginRequest, logout as logoutRequest, signup as signupRequest } from '../api/auth';
 import { clearTokens, loadTokens, saveTokens } from '../api/tokenStorage';
 import { ApiError, AgreementsPayload, MeResponse } from '../api/types';
-import { getMe } from '../api/users';
+import { getMe, updateMe } from '../api/users';
 import { loadAvatarUri, saveAvatarUri } from '../utils/profileStorage';
 
 export type SignUpPayload = {
@@ -43,8 +44,9 @@ type AuthContextValue = {
   user: AuthUser | null;
   signIn: (email: string, password: string) => Promise<void>;
   signUp: (payload: SignUpPayload) => Promise<void>;
-  updateProfile: (input: UpdateProfileInput) => boolean;
+  updateProfile: (input: UpdateProfileInput) => Promise<boolean>;
   signOut: () => Promise<void>;
+  deleteAccount: () => Promise<boolean>;
 };
 
 const DEFAULT_BIO = '매주 새로운 곳을 기록하는 다이어리 ✈️';
@@ -56,7 +58,7 @@ function toAuthUser(me: MeResponse, avatarUri: string | null = null): AuthUser {
     id: me.id,
     email: me.email,
     username: me.nickname,
-    bio: DEFAULT_BIO,
+    bio: me.bio ?? DEFAULT_BIO,
     avatarUri,
     followerCount: 0,
     followingCount: 0,
@@ -162,26 +164,35 @@ export function AuthProvider({ children }: PropsWithChildren) {
     });
   }, []);
 
-  const updateProfile = useCallback((input: UpdateProfileInput) => {
+  const updateProfile = useCallback(async (input: UpdateProfileInput) => {
     const nextUsername = input.username.trim();
     if (!nextUsername) {
       return false;
     }
 
-    setUser((prev) => {
-      if (!prev) {
-        return prev;
-      }
-      void saveAvatarUri(prev.id, input.avatarUri);
-      return {
-        ...prev,
-        username: nextUsername,
-        bio: input.bio.trim(),
-        avatarUri: input.avatarUri,
-      };
+    const currentUser = user;
+    if (!currentUser) {
+      return false;
+    }
+
+    const tokens = await loadTokens();
+    if (!tokens?.access) {
+      throw new ApiError(401, 'UNAUTHORIZED', '로그인이 필요합니다.');
+    }
+
+    const me = await updateMe(tokens.access, {
+      nickname: nextUsername,
+      bio: input.bio.trim(),
+    });
+    await saveAvatarUri(currentUser.id, input.avatarUri);
+    setUser({
+      ...currentUser,
+      username: me.nickname,
+      bio: me.bio ?? '',
+      avatarUri: input.avatarUri,
     });
     return true;
-  }, []);
+  }, [user]);
 
   const signOut = useCallback(async () => {
     const tokens = await loadTokens();
@@ -200,6 +211,23 @@ export function AuthProvider({ children }: PropsWithChildren) {
     await clearTokens();
   }, []);
 
+  const deleteAccount = useCallback(async () => {
+    const tokens = await loadTokens();
+    if (!tokens?.access) {
+      throw new ApiError(401, 'UNAUTHORIZED', '로그인이 필요합니다.');
+    }
+
+    const result = await deleteAccountRequest(tokens.access);
+    if (!result.deleted) {
+      throw new ApiError(500, 'DELETE_FAILED', '회원탈퇴를 완료하지 못했어요.');
+    }
+
+    // 탈퇴 확정 후 재활성 없음 — 로컬 세션만 정리
+    setUser(null);
+    await clearTokens();
+    return true;
+  }, []);
+
   const value = useMemo(
     () => ({
       isReady,
@@ -209,8 +237,9 @@ export function AuthProvider({ children }: PropsWithChildren) {
       signUp,
       updateProfile,
       signOut,
+      deleteAccount,
     }),
-    [isReady, user, signIn, signUp, updateProfile, signOut],
+    [isReady, user, signIn, signUp, updateProfile, signOut, deleteAccount],
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

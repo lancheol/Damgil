@@ -4,7 +4,11 @@ import { buildPlaceSelections, isPlacesSetupComplete } from './diaryPlaces';
 import { looksLikeGeojeStub } from './tripDailyCourse';
 import { toDiaryStatus } from './tripStatus';
 
-function toDiaryPhoto(item: TripItemDto, local?: DiaryPhoto): DiaryPhoto {
+function toDiaryPhoto(
+  item: TripItemDto,
+  local?: DiaryPhoto,
+  serverUri?: string | null,
+): DiaryPhoto {
   const placeContentId =
     item.confirmedPlaceContentId || item.placeContentId || local?.placeContentId || null;
 
@@ -24,8 +28,9 @@ function toDiaryPhoto(item: TripItemDto, local?: DiaryPhoto): DiaryPhoto {
 
   return {
     id: item.id,
-    uri: local?.uri ?? '',
+    uri: local?.uri || serverUri || '',
     mediaType: item.kind === 'video' ? 'video' : 'photo',
+    mediaId: item.mediaId ?? local?.mediaId ?? null,
     placeName: local?.placeName ?? null,
     note: item.note?.trim() || local?.note || '',
     latitude,
@@ -40,13 +45,14 @@ function toDiaryPhoto(item: TripItemDto, local?: DiaryPhoto): DiaryPhoto {
 export function mergeTripItemsWithLocalPhotos(
   items: TripItemDto[],
   localPhotos: DiaryPhoto[],
+  mediaUrisByItemId: Record<string, string | null> = {},
 ): DiaryPhoto[] {
   const localById = new Map(localPhotos.map((photo) => [photo.id, photo]));
   const seen = new Set<string>();
   const merged: DiaryPhoto[] = [];
 
   for (const item of items) {
-    merged.push(toDiaryPhoto(item, localById.get(item.id)));
+    merged.push(toDiaryPhoto(item, localById.get(item.id), mediaUrisByItemId[item.id]));
     seen.add(item.id);
   }
 
@@ -64,8 +70,13 @@ export function mergeTripItemsWithLocalPhotos(
 export function applyTimelineToDiary(
   timeline: TripTimelineResponseDto,
   local: Diary,
+  mediaUrisByItemId: Record<string, string | null> = {},
 ): Diary {
-  const photos = mergeTripItemsWithLocalPhotos(timeline.items, local.photos ?? []);
+  const photos = mergeTripItemsWithLocalPhotos(
+    timeline.items,
+    local.photos ?? [],
+    mediaUrisByItemId,
+  );
   const nextDiary: Diary = {
     ...local,
     name: timeline.title?.trim() || local.name,

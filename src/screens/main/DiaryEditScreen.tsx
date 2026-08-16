@@ -64,13 +64,16 @@ function getFontInputStyle(fontId: DecorFontId) {
 export function DiaryEditScreen({ navigation, route }: Props) {
   const { diaryId } = route.params;
   const insets = useSafeAreaInsets();
-  const { getDiaryById, savePlaceSelections, savePlacePageDecoration, addPhotoToDiary, syncDiaryTimeline, completeDiary, removePhotosFromDiary } =
+  const { getDiaryById, savePlaceSelections, savePlacePageDecoration, addPhotoToDiary, syncDiaryTimeline, syncDiaryEditor, completeDiary, removePhotosFromDiary } =
     useDiaries();
   const diary = getDiaryById(diaryId);
 
   useEffect(() => {
-    void syncDiaryTimeline(diaryId);
-  }, [diaryId, syncDiaryTimeline]);
+    void (async () => {
+      await syncDiaryTimeline(diaryId);
+      await syncDiaryEditor(diaryId);
+    })();
+  }, [diaryId, syncDiaryTimeline, syncDiaryEditor]);
 
   useEffect(() => {
     if (!diary || !diary.endedAt) {
@@ -170,12 +173,12 @@ export function DiaryEditScreen({ navigation, route }: Props) {
     setDirty(true);
   }, []);
 
-  const persistCurrent = useCallback(() => {
+  const persistCurrent = useCallback(async () => {
     const place = activePlaceRef.current;
     if (!place) {
       return true;
     }
-    const ok = savePlacePageDecoration({
+    const ok = await savePlacePageDecoration({
       diaryId,
       placeId: place.id,
       decoration: buildPlacePageDecoration({
@@ -213,14 +216,14 @@ export function DiaryEditScreen({ navigation, route }: Props) {
   useEffect(() => {
     if (!dayPlaces.length) {
       if (dirtyRef.current) {
-        persistCurrent();
+        void persistCurrent();
       }
       setActivePlaceId(null);
       return;
     }
     if (!dayPlaces.some((place) => place.id === activePlaceId)) {
       if (dirtyRef.current) {
-        persistCurrent();
+        void persistCurrent();
       }
       loadedPlaceIdRef.current = null;
       setActivePlaceId(dayPlaces[0].id);
@@ -254,12 +257,12 @@ export function DiaryEditScreen({ navigation, route }: Props) {
     loadedPlaceIdRef.current = activePlace.id;
   }, [activePlace, diary?.placeSelections]);
 
-  const selectPlace = (placeId: string) => {
+  const selectPlace = async (placeId: string) => {
     if (placeId === activePlaceId) {
       return;
     }
     if (dirtyRef.current) {
-      const ok = persistCurrent();
+      const ok = await persistCurrent();
       if (!ok) {
         Alert.alert('저장 실패', '페이지를 저장하지 못했어요.');
         return;
@@ -269,12 +272,12 @@ export function DiaryEditScreen({ navigation, route }: Props) {
     setActivePlaceId(placeId);
   };
 
-  const selectDay = (dateKey: string) => {
+  const selectDay = async (dateKey: string) => {
     if (dateKey === activeDayKey) {
       return;
     }
     if (dirtyRef.current) {
-      const ok = persistCurrent();
+      const ok = await persistCurrent();
       if (!ok) {
         Alert.alert('저장 실패', '페이지를 저장하지 못했어요.');
         return;
@@ -571,21 +574,24 @@ export function DiaryEditScreen({ navigation, route }: Props) {
 
   const handleDone = () => {
     void (async () => {
-      if (dirtyRef.current && !persistCurrent()) {
+      if (dirtyRef.current && !(await persistCurrent())) {
         Alert.alert('저장 실패', '페이지를 저장하지 못했어요.');
         return;
       }
-      await completeDiary(diaryId);
-      navigation.goBack();
+      if (await completeDiary(diaryId)) {
+        navigation.goBack();
+      }
     })();
   };
 
   const handleEditCover = () => {
-    if (dirtyRef.current && !persistCurrent()) {
-      Alert.alert('저장 실패', '페이지를 저장하지 못했어요.');
-      return;
-    }
-    navigation.navigate('DiaryCoverEdit', { diaryId });
+    void (async () => {
+      if (dirtyRef.current && !(await persistCurrent())) {
+        Alert.alert('저장 실패', '페이지를 저장하지 못했어요.');
+        return;
+      }
+      navigation.navigate('DiaryCoverEdit', { diaryId });
+    })();
   };
 
   const handleBack = () => {
@@ -599,11 +605,13 @@ export function DiaryEditScreen({ navigation, route }: Props) {
       {
         text: '저장',
         onPress: () => {
-          if (persistCurrent()) {
-            navigation.goBack();
-          } else {
-            Alert.alert('저장 실패', '페이지를 저장하지 못했어요.');
-          }
+          void (async () => {
+            if (await persistCurrent()) {
+              navigation.goBack();
+            } else {
+              Alert.alert('저장 실패', '페이지를 저장하지 못했어요.');
+            }
+          })();
         },
       },
     ]);
@@ -656,7 +664,7 @@ export function DiaryEditScreen({ navigation, route }: Props) {
               return (
                 <Pressable
                   key={group.dateKey}
-                  onPress={() => selectDay(group.dateKey)}
+                  onPress={() => void selectDay(group.dateKey)}
                   style={[styles.indexTab, selected && styles.indexTabActive]}
                   accessibilityRole="button"
                   accessibilityState={{ selected }}
@@ -814,7 +822,7 @@ export function DiaryEditScreen({ navigation, route }: Props) {
                     return (
                       <Pressable
                         key={place.id}
-                        onPress={() => selectPlace(place.id)}
+                        onPress={() => void selectPlace(place.id)}
                         style={({ pressed }) => [
                           styles.markerBtn,
                           selected && styles.markerSelected,

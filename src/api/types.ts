@@ -47,11 +47,38 @@ export type MeResponse = {
   id: string;
   email: string;
   nickname: string;
+  bio: string | null;
   provider: string;
   status: string;
   createdAt: string;
   updatedAt: string;
   profile: unknown;
+};
+
+export type UpdateMeRequest = {
+  nickname?: string;
+  bio?: string;
+};
+
+export type AccountDeletionPreviewDto = {
+  deleted: boolean;
+  willDelete: Record<string, number>;
+  willAnonymize: string[];
+  willRetain: Record<string, string>;
+};
+
+export type AccountDeletionJobDto = {
+  jobId: string;
+  status: string;
+  targets: Record<string, unknown>;
+  retryCount: number;
+  requestedAt: string;
+  completedAt: string | null;
+};
+
+export type DeleteAccountResponseDto = {
+  deleted: boolean;
+  job: AccountDeletionJobDto;
 };
 
 export type TripVisibility = 'private' | 'friends' | 'public';
@@ -98,6 +125,26 @@ export type TripDto = {
   endDate: string | null;
   coverTitleFont: string | null;
   coverStickerLayout: Record<string, unknown> | null;
+};
+
+export type TripListItemDto = TripDto & {
+  updatedAt: string;
+  regionName: string | null;
+  coverThumbUrl: string | null;
+  editStatus: 'DRAFT' | 'COMPLETED';
+};
+
+export type TripListResponseDto = {
+  items: TripListItemDto[];
+  total: number;
+  hasNext: boolean;
+};
+
+export type TripListQuery = {
+  editStatus?: 'DRAFT' | 'COMPLETED';
+  sort?: 'updated' | 'created';
+  page?: number;
+  pageSize?: number;
 };
 
 export type TripItemKind = 'photo' | 'video';
@@ -156,6 +203,57 @@ export type TripItemDecorationDto = {
   font: string | null;
   stickerLayout: Record<string, unknown> | null;
   updatedAt: string;
+};
+
+export type EditorObjectType = 'TEXT' | 'STICKER' | 'IMAGE';
+
+export type EditorObjectDto = {
+  objectId: string;
+  objectType: EditorObjectType;
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  rotation: number;
+  layer: number;
+  text?: string;
+  fontFamily?: string;
+  fontSize?: number;
+  align?: 'left' | 'center' | 'right';
+  stickerId?: string;
+  mediaId?: string;
+};
+
+export type EditorStateDto = {
+  objects: EditorObjectDto[];
+};
+
+export type DiaryEditorStateDto = {
+  dayNumber: number;
+  editorState: EditorStateDto;
+  revision: number;
+  updatedAt: string;
+};
+
+export type DiaryEditorStateListResponseDto = {
+  editStatus: 'DRAFT' | 'COMPLETED';
+  days: DiaryEditorStateDto[];
+};
+
+export type AutosaveEditorStateRequest = {
+  dayNumber: number;
+  revision: number;
+  editorState: EditorStateDto;
+};
+
+export type AutosaveEditorStateResponseDto = {
+  dayNumber: number;
+  revision: number;
+  updatedAt: string;
+};
+
+export type PublishTripRequest = {
+  visibility: 'private' | 'public';
 };
 
 /** Swagger에 스키마 없음 — 응답 description: { [dayNumber]: TripDailyCourse[] } */

@@ -70,6 +70,8 @@ export type DiaryPhoto = {
   id: string;
   uri: string;
   mediaType: DiaryMediaType;
+  /** 서버 Media.id — 업로드 후 기록·표지·에디터가 참조 */
+  mediaId?: string | null;
   placeName?: string | null;
   note?: string;
   latitude: number;
@@ -120,12 +122,19 @@ export type Diary = {
   endedAt?: string | null;
   /** 서버 여행 상태 — recording(촬영) | editing(꾸미기) | completed(완료) */
   status?: 'recording' | 'editing' | 'completed';
+  /** 서버 editStatus 매핑값 — DRAFT | COMPLETED */
+  editStatus?: 'DRAFT' | 'COMPLETED' | null;
+  updatedAt?: string | null;
+  likeCount?: number;
+  commentCount?: number;
+  /** 목록용 표지 썸네일(presigned). 로컬 cover/photos가 없을 때 사용 */
+  coverThumbUrl?: string | null;
   photos: DiaryPhoto[];
   cover?: DiaryCover | null;
   coverDraft?: DiaryCover | null;
   /** 공개 범위 — 임시 저장·종료 직후는 private */
   visibility?: 'public' | 'private';
-  /** 장소별 대표 사진 확정 시각 — 없으면 첫 편집(대표 선택) 필요 */
+  /** 장소별 대표 사진 확정 시각 — 없으면 첫 진입(대표 선택) 필요 */
   placesSetupAt?: string | null;
   placeSelections?: DiaryPlaceSelection[] | null;
 };
@@ -156,8 +165,6 @@ export type AddDiaryPhotoInput = {
   longitude: number;
   /** TourAPI contentId — 있으면 위치 확정 API 호출 */
   placeContentId?: string | null;
-  /** 이미 POST /items 로 만든 서버 기록 id */
-  serverItemId?: string | null;
   /** 갤러리에서 가져올 때 — 여행 종료 후에도 추가 허용 */
   allowAfterEnd?: boolean;
 };
