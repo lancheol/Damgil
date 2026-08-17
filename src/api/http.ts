@@ -1,4 +1,6 @@
 import { API_BASE_URL, API_PREFIX } from './config';
+import { refreshStoredTokens } from './sessionRefresh';
+import { loadTokens } from './tokenStorage';
 import { ApiError, ApiErrorBody } from './types';
 
 type RequestOptions = {
@@ -34,7 +36,11 @@ function parseErrorBody(payload: unknown): ApiErrorBody | null {
   };
 }
 
-export async function apiRequest<T>(path: string, options: RequestOptions = {}): Promise<T> {
+async function performRequest<T>(
+  path: string,
+  options: RequestOptions,
+  allowRefresh: boolean,
+): Promise<T> {
   const headers: Record<string, string> = {
     Accept: 'application/json',
     ...(options.headers ?? {}),
@@ -55,6 +61,33 @@ export async function apiRequest<T>(path: string, options: RequestOptions = {}):
   const payload = await response.json().catch(() => null);
 
   if (!response.ok) {
+    if (response.status === 401 && options.accessToken && allowRefresh) {
+      const stored = await loadTokens();
+      const nextTokens =
+        stored?.access && stored.access !== options.accessToken
+          ? stored
+          : await refreshStoredTokens();
+      const retryBody =
+        path === '/auth/logout' &&
+        options.body &&
+        typeof options.body === 'object' &&
+        'refreshToken' in options.body
+          ? {
+              ...(options.body as Record<string, unknown>),
+              refreshToken: nextTokens.refresh,
+            }
+          : options.body;
+      return performRequest<T>(
+        path,
+        {
+          ...options,
+          accessToken: nextTokens.access,
+          body: retryBody,
+        },
+        false,
+      );
+    }
+
     const parsed = parseErrorBody(payload);
     const retryAfter = response.headers.get('Retry-After');
     const detail =
@@ -70,4 +103,11 @@ export async function apiRequest<T>(path: string, options: RequestOptions = {}):
   }
 
   return payload as T;
+}
+
+export function apiRequest<T>(
+  path: string,
+  options: RequestOptions = {},
+): Promise<T> {
+  return performRequest<T>(path, options, true);
 }

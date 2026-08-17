@@ -1,8 +1,8 @@
 import { Ionicons } from '@expo/vector-icons';
-import { CompositeScreenProps } from '@react-navigation/native';
+import { CompositeScreenProps, useFocusEffect } from '@react-navigation/native';
 import { BottomTabScreenProps } from '@react-navigation/bottom-tabs';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Alert,
   Dimensions,
@@ -18,7 +18,11 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { MyPageHeartIcon } from '../../components/mypage/MyPageIcons';
 import { SEARCH_USERS } from '../../constants/users';
+import { useAuth } from '../../context/AuthContext';
 import { useDiaries } from '../../context/DiaryContext';
+import { getPublicFeed } from '../../api/feed';
+import { getMediaDisplayUri } from '../../api/media';
+import { loadTokens } from '../../api/tokenStorage';
 import { MainTabParamList, RootStackParamList } from '../../navigation/types';
 import { Diary } from '../../types/diary';
 import { CoverThumb } from '../../components/diary/CoverThumb';
@@ -26,6 +30,8 @@ import { getCoverBackgroundColor, getEffectiveCover } from '../../utils/diaryCov
 import { colors } from '../../theme';
 import type { Festival } from '../../types/festival';
 import { loadFestivals } from '../../utils/festivals';
+import { feedItemToCard, type FeedDiaryCard } from '../../utils/feedMapper';
+import { isDiaryPublished } from '../../utils/tripStatus';
 
 type Props = CompositeScreenProps<
   BottomTabScreenProps<MainTabParamList, 'Search'>,
@@ -65,13 +71,19 @@ const SHORTCUTS: ShortcutConfig[] = [
 ];
 
 type GridCell =
-  | { kind: 'diary'; key: string; diary: Diary }
+  | { kind: 'feed'; key: string; card: FeedDiaryCard }
   | { kind: 'placeholder'; key: string; tone: string };
 
 export function SearchScreen({ navigation }: Props) {
-  const { diaries } = useDiaries();
+  const { user } = useAuth();
+  const { diaries, openPublicDiary } = useDiaries();
   const [query, setQuery] = useState('');
   const [festivals, setFestivals] = useState<Festival[]>([]);
+  const [feedCards, setFeedCards] = useState<FeedDiaryCard[]>([]);
+  const [feedLoading, setFeedLoading] = useState(true);
+  const [openingId, setOpeningId] = useState<string | null>(null);
+  const feedRequestRef = useRef(0);
+  const feedLoadedRef = useRef(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -87,24 +99,84 @@ export function SearchScreen({ navigation }: Props) {
     };
   }, []);
 
-  const cells = useMemo<GridCell[]>(() => {
-    const ended = [...diaries]
-      .filter((diary) => Boolean(diary.endedAt))
-      .sort(
-        (a, b) =>
-          new Date(b.endedAt ?? b.createdAt).getTime() - new Date(a.endedAt ?? a.createdAt).getTime(),
-      )
-      .map<GridCell>((diary) => ({ kind: 'diary', key: diary.id, diary }));
+  const loadFeed = useCallback(async (silent: boolean) => {
+    const requestId = feedRequestRef.current + 1;
+    feedRequestRef.current = requestId;
+    if (!silent) setFeedLoading(true);
+    try {
+      const tokens = await loadTokens();
+      if (!tokens?.access) {
+        if (feedRequestRef.current === requestId) setFeedCards([]);
+        return;
+      }
+      const feed = await getPublicFeed(tokens.access, {
+        page: 1,
+        limit: 12,
+        sort: 'recent',
+      });
+      const cards = await Promise.all(
+        feed.items.map(async (item) => {
+          let coverThumbUrl: string | null = null;
+          if (item.coverMediaId) {
+            try {
+              coverThumbUrl = await getMediaDisplayUri(tokens.access, item.coverMediaId);
+            } catch {
+              coverThumbUrl = null;
+            }
+          }
+          return feedItemToCard(item, coverThumbUrl);
+        }),
+      );
+      if (feedRequestRef.current === requestId) setFeedCards(cards);
+    } catch {
+      if (feedRequestRef.current === requestId) setFeedCards([]);
+    } finally {
+      if (feedRequestRef.current === requestId) setFeedLoading(false);
+    }
+  }, []);
 
-    const fillCount = Math.max(0, MIN_GRID_CELLS - ended.length);
+  useFocusEffect(
+    useCallback(() => {
+      const silent = feedLoadedRef.current;
+      feedLoadedRef.current = true;
+      void loadFeed(silent);
+    }, [loadFeed]),
+  );
+
+  const cells = useMemo<GridCell[]>(() => {
+    const feed = feedCards.map<GridCell>((card) => ({
+      kind: 'feed',
+      key: card.id,
+      card,
+    }));
+    const fillCount = Math.max(0, MIN_GRID_CELLS - feed.length);
     const fillers = Array.from({ length: fillCount }, (_, index) => ({
       kind: 'placeholder' as const,
       key: `placeholder-${index}`,
-      tone: PLACEHOLDER_TONES[(ended.length + index) % PLACEHOLDER_TONES.length],
+      tone: PLACEHOLDER_TONES[(feed.length + index) % PLACEHOLDER_TONES.length],
     }));
+    return [...feed, ...fillers];
+  }, [feedCards]);
 
-    return [...ended, ...fillers];
-  }, [diaries]);
+  const openFeedDiary = async (card: FeedDiaryCard) => {
+    if (openingId) return;
+    setOpeningId(card.id);
+    try {
+      const result = await openPublicDiary(card.id);
+      if (result.status === 'gone') {
+        setFeedCards((prev) => prev.filter((item) => item.id !== card.id));
+        return;
+      }
+      if (result.status !== 'ok') return;
+      const isMine = user?.id != null && card.userId === user.id;
+      navigation.navigate('DiaryEdit', {
+        diaryId: result.diary.id,
+        mode: isMine && !isDiaryPublished(result.diary) ? 'edit' : 'view',
+      });
+    } finally {
+      setOpeningId(null);
+    }
+  };
 
   const keyword = query.trim();
   const isSearching = keyword.length > 0;
@@ -283,7 +355,12 @@ export function SearchScreen({ navigation }: Props) {
                   <DiaryCell
                     key={diary.id}
                     diary={diary}
-                    onPress={() => navigation.navigate('DiaryEdit', { diaryId: diary.id })}
+                    onPress={() =>
+                      navigation.navigate('DiaryEdit', {
+                        diaryId: diary.id,
+                        mode: isDiaryPublished(diary) ? 'view' : 'edit',
+                      })
+                    }
                   />
                 ))}
               </View>
@@ -333,14 +410,18 @@ export function SearchScreen({ navigation }: Props) {
               cell.kind === 'placeholder' ? (
                 <View key={cell.key} style={[styles.thumb, { backgroundColor: cell.tone }]} />
               ) : (
-                <DiaryCell
+                <FeedDiaryCell
                   key={cell.key}
-                  diary={cell.diary}
-                  onPress={() => navigation.navigate('DiaryEdit', { diaryId: cell.diary.id })}
+                  card={cell.card}
+                  busy={openingId === cell.card.id}
+                  onPress={() => void openFeedDiary(cell.card)}
                 />
               ),
             )}
           </View>
+          {!feedLoading && feedCards.length === 0 ? (
+            <Text style={styles.feedEmptyText}>아직 공개된 여행 다이어리가 없어요.</Text>
+          ) : null}
         </ScrollView>
       )}
     </SafeAreaView>
@@ -355,7 +436,7 @@ type DiaryCellProps = {
 function DiaryCell({ diary, onPress }: DiaryCellProps) {
   const cover = getEffectiveCover(diary);
   const title = cover.title?.trim() || diary.name;
-  const photoCount = diary.photos?.length ?? 0;
+  const likeCount = diary.likeCount ?? 0;
 
   return (
     <Pressable
@@ -370,12 +451,64 @@ function DiaryCell({ diary, onPress }: DiaryCellProps) {
     >
       <CoverThumb diary={diary} />
 
-      {photoCount > 0 ? (
-        <View style={styles.photoBadge}>
-          <MyPageHeartIcon size={10} />
-          <Text style={styles.photoCount}>{photoCount}</Text>
-        </View>
-      ) : null}
+      <View style={styles.photoBadge}>
+        <MyPageHeartIcon size={10} />
+        <Text style={styles.photoCount}>{likeCount}</Text>
+      </View>
+    </Pressable>
+  );
+}
+
+type FeedDiaryCellProps = {
+  card: FeedDiaryCard;
+  busy?: boolean;
+  onPress: () => void;
+};
+
+function FeedDiaryCell({ card, busy, onPress }: FeedDiaryCellProps) {
+  const stubDiary: Diary = {
+    id: card.id,
+    name: card.title,
+    place: '',
+    createdAt: card.publishedAt ?? new Date().toISOString(),
+    endedAt: card.publishedAt,
+    status: 'completed',
+    editStatus: 'COMPLETED',
+    likeCount: card.likeCount,
+    commentCount: card.commentCount,
+    coverThumbUrl: card.coverThumbUrl,
+    photos: [],
+    cover: {
+      coverPhotoId: null,
+      title: card.title,
+      fontId: 'sans',
+      stickers: [],
+      photos: [],
+      texts: [],
+      backgroundColor: '#1A1A1A',
+      updatedAt: new Date().toISOString(),
+    },
+    coverDraft: null,
+    visibility: 'public',
+  };
+
+  return (
+    <Pressable
+      accessibilityRole="button"
+      accessibilityLabel={`${card.title} 다이어리`}
+      disabled={busy}
+      onPress={onPress}
+      style={({ pressed }) => [
+        styles.thumb,
+        { backgroundColor: getCoverBackgroundColor(stubDiary.cover) },
+        (pressed || busy) && styles.pressed,
+      ]}
+    >
+      <CoverThumb diary={stubDiary} />
+      <View style={styles.photoBadge}>
+        <MyPageHeartIcon size={10} />
+        <Text style={styles.photoCount}>{card.likeCount}</Text>
+      </View>
     </Pressable>
   );
 }
@@ -489,6 +622,12 @@ const styles = StyleSheet.create({
     lineHeight: 28,
     fontWeight: '600',
     color: '#1E2939',
+  },
+  feedEmptyText: {
+    marginTop: 12,
+    fontSize: 13,
+    lineHeight: 18,
+    color: '#99A1AF',
   },
   resultTitle: {
     marginTop: 16,

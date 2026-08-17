@@ -1,11 +1,13 @@
 import { Ionicons } from '@expo/vector-icons';
 import { BottomTabScreenProps } from '@react-navigation/bottom-tabs';
-import { CompositeScreenProps } from '@react-navigation/native';
+import { CompositeScreenProps, useFocusEffect } from '@react-navigation/native';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import * as Location from 'expo-location';
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Alert,
+  Dimensions,
+  Image,
   Keyboard,
   Pressable,
   ScrollView,
@@ -24,27 +26,45 @@ import {
   MapPlace,
   MapPlaceCategory,
 } from '../../constants/mapPlaces';
+import { listSavedPlaces, savePlace, unsavePlace } from '../../api/saves';
+import { loadTokens } from '../../api/tokenStorage';
+import { ApiError } from '../../api/types';
 import { MainTabParamList, RootStackParamList } from '../../navigation/types';
-import { colors, radii, spacing, typography } from '../../theme';
+import { colors, radii, spacing } from '../../theme';
 
 type Props = CompositeScreenProps<
   BottomTabScreenProps<MainTabParamList, 'Map'>,
   NativeStackScreenProps<RootStackParamList>
 >;
 
+/** 장소별 관련 공개 다이어리 — API 연동 전까지 UI 골격용 */
+type PlaceRelatedDiary = {
+  id: string;
+  authorNickname: string;
+  title: string;
+  dateLabel: string;
+  saveCount: number;
+  coverThumbUrl: string | null;
+};
+
 const MARKER_TRACK_MS = 500;
 /** 카드가 마커를 가리지 않도록 지도를 살짝 위로 밀어주는 값 */
 const FOCUS_LAT_OFFSET = 0.006;
+const SHEET_MAX_HEIGHT = Math.round(Dimensions.get('window').height * 0.48);
 
-export function MapScreen({ navigation }: Props) {
+export function MapScreen(_props: Props) {
   const insets = useSafeAreaInsets();
   const mapRef = useRef<MapView | null>(null);
   const [query, setQuery] = useState('');
   const [category, setCategory] = useState<MapPlaceCategory | null>(null);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [savedIds, setSavedIds] = useState<string[]>([]);
+  const [saveBusyId, setSaveBusyId] = useState<string | null>(null);
   const [trackMarkers, setTrackMarkers] = useState(true);
   const [showsUserLocation, setShowsUserLocation] = useState(false);
+  /** TODO: 장소 contentId 기준 관련 다이어리 API로 교체 */
+  const [relatedDiaries, setRelatedDiaries] = useState<PlaceRelatedDiary[]>([]);
+  const [relatedLoading, setRelatedLoading] = useState(false);
 
   const places = useMemo(() => {
     const keyword = query.trim().toLowerCase();
@@ -61,11 +81,42 @@ export function MapScreen({ navigation }: Props) {
   const selectedPlace = places.find((place) => place.id === selectedId) ?? null;
   const isSaved = selectedPlace ? savedIds.includes(selectedPlace.id) : false;
 
+  const refreshSavedIds = useCallback(async () => {
+    try {
+      const tokens = await loadTokens();
+      if (!tokens?.access) {
+        setSavedIds([]);
+        return;
+      }
+      const items = await listSavedPlaces(tokens.access);
+      setSavedIds(items.map((item) => item.contentId));
+    } catch {
+      // 목록 실패 시 기존 UI 유지 — 토글 시 서버가 최종 상태
+    }
+  }, []);
+
+  useFocusEffect(
+    useCallback(() => {
+      void refreshSavedIds();
+    }, [refreshSavedIds]),
+  );
+
   useEffect(() => {
     setTrackMarkers(true);
     const timer = setTimeout(() => setTrackMarkers(false), MARKER_TRACK_MS);
     return () => clearTimeout(timer);
   }, [places, selectedId]);
+
+  useEffect(() => {
+    if (!selectedId) {
+      setRelatedDiaries([]);
+      setRelatedLoading(false);
+      return;
+    }
+    // TODO: 장소 contentId 기준 관련 다이어리 API 연결
+    setRelatedLoading(false);
+    setRelatedDiaries([]);
+  }, [selectedId]);
 
   const moveTo = (region: Region) => {
     mapRef.current?.animateToRegion(region, 400);
@@ -110,14 +161,40 @@ export function MapScreen({ navigation }: Props) {
     });
   };
 
-  const toggleSaved = (placeId: string) => {
-    setSavedIds((prev) =>
-      prev.includes(placeId) ? prev.filter((id) => id !== placeId) : [...prev, placeId],
-    );
-  };
+  const toggleSaved = async (contentId: string) => {
+    if (saveBusyId) return;
+    setSaveBusyId(contentId);
+    const wasSaved = savedIds.includes(contentId);
+    try {
+      const tokens = await loadTokens();
+      if (!tokens?.access) {
+        Alert.alert('찜하기 실패', '로그인이 필요합니다.');
+        return;
+      }
 
-  const openDirections = (place: MapPlace) => {
-    navigation.navigate('MapRoute', { placeId: place.id });
+      if (wasSaved) {
+        await unsavePlace(tokens.access, contentId);
+        setSavedIds((prev) => prev.filter((id) => id !== contentId));
+      } else {
+        const result = await savePlace(tokens.access, { contentId });
+        if (result.saved) {
+          setSavedIds((prev) =>
+            prev.includes(result.contentId) ? prev : [...prev, result.contentId],
+          );
+        }
+      }
+    } catch (error) {
+      const message =
+        error instanceof ApiError
+          ? error.message
+          : wasSaved
+            ? '찜을 해제하지 못했어요.'
+            : '찜하지 못했어요.';
+      Alert.alert(wasSaved ? '찜 해제 실패' : '찜하기 실패', message);
+      void refreshSavedIds();
+    } finally {
+      setSaveBusyId(null);
+    }
   };
 
   return (
@@ -233,7 +310,9 @@ export function MapScreen({ navigation }: Props) {
         </View>
 
         {selectedPlace ? (
-          <View style={styles.card}>
+          <View style={[styles.sheet, { maxHeight: SHEET_MAX_HEIGHT }]}>
+            <View style={styles.sheetHandle} />
+
             <View style={styles.cardHeader}>
               <View style={styles.cardHeaderText}>
                 <View style={styles.cardTitleRow}>
@@ -243,6 +322,25 @@ export function MapScreen({ navigation }: Props) {
                   <View style={styles.cardBadge}>
                     <Text style={styles.cardBadgeText}>{selectedPlace.category}</Text>
                   </View>
+                  <Pressable
+                    accessibilityRole="button"
+                    accessibilityLabel={isSaved ? '찜 해제' : '찜하기'}
+                    disabled={saveBusyId === selectedPlace.id}
+                    hitSlop={8}
+                    style={[
+                      styles.heartButton,
+                      saveBusyId === selectedPlace.id && styles.heartButtonBusy,
+                    ]}
+                    onPress={() => {
+                      void toggleSaved(selectedPlace.id);
+                    }}
+                  >
+                    <Ionicons
+                      name={isSaved ? 'heart' : 'heart-outline'}
+                      size={20}
+                      color={isSaved ? '#E11D48' : '#6A7282'}
+                    />
+                  </Pressable>
                 </View>
                 <Text style={styles.cardAddress} numberOfLines={1}>
                   {selectedPlace.address} · 현재 위치에서 {selectedPlace.distanceKm}km
@@ -276,46 +374,72 @@ export function MapScreen({ navigation }: Props) {
               })}
             </View>
 
-            <View style={styles.actionRow}>
-              <Pressable
-                accessibilityRole="button"
-                style={[styles.actionSmall, isSaved && styles.actionSmallActive]}
-                onPress={() => toggleSaved(selectedPlace.id)}
-              >
-                <Ionicons
-                  name={isSaved ? 'heart' : 'heart-outline'}
-                  size={18}
-                  color={isSaved ? colors.white : '#364153'}
-                />
-                <Text style={[styles.actionSmallText, isSaved && styles.actionSmallTextActive]}>
-                  {isSaved ? '찜됨' : '찜하기'}
-                </Text>
-              </Pressable>
-
-              <Pressable
-                accessibilityRole="button"
-                style={styles.actionSmall}
-                onPress={() =>
-                  Alert.alert('다이어리', '이 장소의 다이어리 기능은 준비 중이에요.')
-                }
-              >
-                <Ionicons name="chatbubble-outline" size={18} color="#364153" />
-                <Text style={styles.actionSmallText}>다이어리</Text>
-              </Pressable>
-
-              <Pressable
-                accessibilityRole="button"
-                style={styles.actionPrimary}
-                onPress={() => openDirections(selectedPlace)}
-              >
-                <Ionicons name="navigate-circle-outline" size={18} color={colors.white} />
-                <Text style={styles.actionPrimaryText}>길찾기</Text>
-              </Pressable>
+            <View style={styles.diarySectionHeader}>
+              <Text style={styles.diarySectionTitle}>관련 다이어리</Text>
+              <Text style={styles.diarySectionCount}>{relatedDiaries.length}개</Text>
             </View>
+
+            <ScrollView
+              style={styles.diaryList}
+              contentContainerStyle={styles.diaryListContent}
+              showsVerticalScrollIndicator={false}
+              nestedScrollEnabled
+              keyboardShouldPersistTaps="handled"
+            >
+              {relatedLoading ? (
+                <Text style={styles.diaryEmptyText}>불러오는 중…</Text>
+              ) : relatedDiaries.length === 0 ? (
+                <Text style={styles.diaryEmptyText}>이 장소의 공개 다이어리가 아직 없어요.</Text>
+              ) : (
+                relatedDiaries.map((diary) => (
+                  <RelatedDiaryRow key={diary.id} diary={diary} />
+                ))
+              )}
+            </ScrollView>
           </View>
         ) : null}
       </View>
     </View>
+  );
+}
+
+function RelatedDiaryRow({ diary }: { diary: PlaceRelatedDiary }) {
+  return (
+    <Pressable
+      accessibilityRole="button"
+      style={styles.diaryRow}
+      onPress={() => {
+        // TODO: 공개 다이어리 보기 연동
+      }}
+    >
+      <View style={styles.diaryCover}>
+        {diary.coverThumbUrl ? (
+          <Image source={{ uri: diary.coverThumbUrl }} style={styles.diaryCoverImage} />
+        ) : (
+          <View style={styles.diaryCoverFallback}>
+            <Ionicons name="book-outline" size={22} color="#9CA3AF" />
+          </View>
+        )}
+      </View>
+
+      <View style={styles.diaryMeta}>
+        <Text style={styles.diaryTitle} numberOfLines={1}>
+          {diary.title}
+        </Text>
+        <Text style={styles.diaryAuthor} numberOfLines={1}>
+          {diary.authorNickname}
+        </Text>
+        <View style={styles.diaryFooter}>
+          <Text style={styles.diaryDate} numberOfLines={1}>
+            {diary.dateLabel}
+          </Text>
+          <View style={styles.diarySaveCount}>
+            <Ionicons name="heart" size={12} color="#99A1AF" />
+            <Text style={styles.diarySaveCountText}>{diary.saveCount}</Text>
+          </View>
+        </View>
+      </View>
+    </Pressable>
   );
 }
 
@@ -455,10 +579,11 @@ const styles = StyleSheet.create({
     shadowOffset: { width: 0, height: 4 },
     elevation: 4,
   },
-  card: {
+  sheet: {
     marginHorizontal: spacing.lg,
     paddingHorizontal: spacing.lg,
-    paddingVertical: 20,
+    paddingTop: spacing.sm,
+    paddingBottom: spacing.md,
     borderRadius: 24,
     backgroundColor: colors.white,
     borderWidth: StyleSheet.hairlineWidth,
@@ -468,6 +593,14 @@ const styles = StyleSheet.create({
     shadowRadius: 20,
     shadowOffset: { width: 0, height: 12 },
     elevation: 12,
+  },
+  sheetHandle: {
+    alignSelf: 'center',
+    width: 36,
+    height: 4,
+    borderRadius: 2,
+    backgroundColor: '#E5E7EB',
+    marginBottom: spacing.md,
   },
   cardHeader: {
     flexDirection: 'row',
@@ -499,6 +632,16 @@ const styles = StyleSheet.create({
     fontSize: 10,
     fontWeight: '500',
     color: '#6A7282',
+  },
+  heartButton: {
+    width: 28,
+    height: 28,
+    borderRadius: 14,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  heartButtonBusy: {
+    opacity: 0.45,
   },
   cardAddress: {
     marginTop: spacing.xs,
@@ -534,54 +677,95 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     color: '#4A5565',
   },
-  actionRow: {
+  diarySectionHeader: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: spacing.sm,
+    justifyContent: 'space-between',
     paddingTop: spacing.lg,
+    paddingBottom: spacing.sm,
   },
-  actionSmall: {
+  diarySectionTitle: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: '#1E2939',
+  },
+  diarySectionCount: {
+    fontSize: 12,
+    fontWeight: '500',
+    color: '#6A7282',
+  },
+  diaryList: {
+    flexGrow: 0,
+  },
+  diaryListContent: {
+    paddingBottom: spacing.xs,
+  },
+  diaryEmptyText: {
+    paddingVertical: spacing.lg,
+    fontSize: 13,
+    lineHeight: 18,
+    color: '#99A1AF',
+    textAlign: 'center',
+  },
+  diaryRow: {
+    flexDirection: 'row',
+    gap: spacing.md,
+    paddingVertical: spacing.md,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: '#F3F4F6',
+  },
+  diaryCover: {
+    width: 84,
+    height: 84,
+    borderRadius: radii.md,
+    overflow: 'hidden',
+    backgroundColor: '#F3F4F6',
+  },
+  diaryCoverImage: {
+    width: '100%',
+    height: '100%',
+  },
+  diaryCoverFallback: {
     flex: 1,
-    height: 48,
     alignItems: 'center',
     justifyContent: 'center',
-    gap: 2,
-    borderRadius: radii.md,
-    backgroundColor: '#F9FAFB',
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: '#E5E7EB',
   },
-  actionSmallActive: {
-    backgroundColor: '#101828',
-    borderColor: '#101828',
+  diaryMeta: {
+    flex: 1,
+    justifyContent: 'center',
+    gap: 4,
+    minWidth: 0,
   },
-  actionSmallText: {
-    fontSize: 10,
+  diaryTitle: {
+    fontSize: 15,
+    fontWeight: '700',
+    color: '#1E2939',
+  },
+  diaryAuthor: {
+    fontSize: 13,
     fontWeight: '500',
-    color: '#364153',
+    color: '#2F6BFF',
   },
-  actionSmallTextActive: {
-    color: colors.white,
-  },
-  actionPrimary: {
-    flex: 2,
-    height: 48,
+  diaryFooter: {
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'center',
-    gap: 6,
-    borderRadius: radii.md,
-    backgroundColor: '#155DFC',
-    shadowColor: colors.black,
-    shadowOpacity: 0.12,
-    shadowRadius: 3,
-    shadowOffset: { width: 0, height: 1 },
-    elevation: 3,
+    justifyContent: 'space-between',
+    gap: spacing.sm,
+    marginTop: 2,
   },
-  actionPrimaryText: {
-    ...typography.label,
-    fontSize: 14,
-    fontWeight: '600',
-    color: colors.white,
+  diaryDate: {
+    flexShrink: 1,
+    fontSize: 12,
+    color: '#6A7282',
+  },
+  diarySaveCount: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+  },
+  diarySaveCountText: {
+    fontSize: 12,
+    fontWeight: '500',
+    color: '#6A7282',
   },
 });

@@ -23,6 +23,7 @@ import { MainTabParamList, RootStackParamList } from '../../navigation/types';
 import { Diary } from '../../types/diary';
 import { CoverThumb } from '../../components/diary/CoverThumb';
 import { getEffectiveCover } from '../../utils/diaryCover';
+import { isDiaryPublished } from '../../utils/tripStatus';
 import { colors, radii, spacing, typography } from '../../theme';
 
 type Props = CompositeScreenProps<
@@ -57,12 +58,16 @@ export function MyPageScreen({ navigation }: Props) {
   );
 
   const openDiary = (diary: Diary) => {
+    if (isDiaryPublished(diary)) {
+      navigation.navigate('DiaryEdit', { diaryId: diary.id, mode: 'view' });
+      return;
+    }
     const isDraft = Boolean(diary.coverDraft) && !diary.cover;
     if (isDraft) {
       navigation.navigate('DiaryCoverEdit', { diaryId: diary.id });
       return;
     }
-    navigation.navigate('DiaryEdit', { diaryId: diary.id });
+    navigation.navigate('DiaryEdit', { diaryId: diary.id, mode: 'edit' });
   };
 
   const confirmDelete = (diary: Diary) => {
@@ -101,7 +106,8 @@ export function MyPageScreen({ navigation }: Props) {
     const likeCount = item.likeCount ?? 0;
     const title = cover.title?.trim() || item.name;
     const isDraft =
-      item.editStatus === 'DRAFT' || (Boolean(item.coverDraft) && !item.cover);
+      !isDiaryPublished(item) &&
+      (item.editStatus === 'DRAFT' || (Boolean(item.coverDraft) && !item.cover));
     const isPrivate = (item.visibility ?? 'private') === 'private';
 
     return (

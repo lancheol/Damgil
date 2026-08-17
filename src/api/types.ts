@@ -256,6 +256,78 @@ export type PublishTripRequest = {
   visibility: 'private' | 'public';
 };
 
+export type FeedItemDto = {
+  id: string;
+  userId: string;
+  authorNickname: string | null;
+  title: string | null;
+  areaCode: number | null;
+  coverMediaId: string | null;
+  visibility: string;
+  likeCount: number;
+  commentCount: number;
+  liked: boolean;
+  startedAt: string;
+  endedAt: string | null;
+  publishedAt: string | null;
+  createdAt: string;
+};
+
+export type FeedResponseDto = {
+  items: FeedItemDto[];
+  page: number;
+  limit: number;
+  hasMore: boolean;
+};
+
+export type FeedListQuery = {
+  page?: number;
+  limit?: number;
+  area?: number;
+  sort?: 'recent';
+};
+
+/** POST /saves */
+export type SavePlaceRequest = {
+  contentId: string;
+};
+
+export type SavePlaceResponseDto = {
+  saved: boolean;
+  contentId: string;
+};
+
+/** GET /saves — place_cache 없으면 place null */
+export type PlaceCacheSummaryDto = {
+  contentId: string;
+  title: string | null;
+  addr1: string | null;
+  firstImage: string | null;
+  lat: number | null;
+  lng: number | null;
+  contentTypeId: string | null;
+};
+
+export type SavedPlaceItemDto = {
+  userId: string;
+  contentId: string;
+  createdAt: string;
+  place: PlaceCacheSummaryDto | null;
+};
+
+/** GET /public/trips · /public/trips/{id} — Swagger 스키마 비어 있어 라이브 응답 기준 */
+export type PublicTripListItemDto = TripDto & {
+  updatedAt?: string;
+  isDeleted?: boolean;
+  deletedAt?: string | null;
+  coverUrl?: string | null;
+};
+
+export type PublicTripDetailDto = PublicTripListItemDto & {
+  items: TripItemDto[];
+  regionIds: string[];
+};
+
 /** Swagger에 스키마 없음 — 응답 description: { [dayNumber]: TripDailyCourse[] } */
 export type TripDailyCourseDto = {
   placeContentId?: string | null;

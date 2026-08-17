@@ -17,7 +17,7 @@ import { DiaryPlacePickScreen } from '../screens/main/DiaryPlacePickScreen';
 import { DiaryRecordDecorateScreen } from '../screens/main/DiaryRecordDecorateScreen';
 import { DiaryRecordDetailScreen } from '../screens/main/DiaryRecordDetailScreen';
 import { FestivalListScreen } from '../screens/main/FestivalListScreen';
-import { MapRouteScreen } from '../screens/main/MapRouteScreen';
+// import { MapRouteScreen } from '../screens/main/MapRouteScreen'; // 길찾기 일시 비활성
 import { ProfileEditScreen } from '../screens/main/ProfileEditScreen';
 import { SettingsScreen } from '../screens/main/SettingsScreen';
 import { TravelSubsidyScreen } from '../screens/main/TravelSubsidyScreen';
@@ -104,6 +104,8 @@ export function RootNavigator() {
                 animation: 'slide_from_right',
               }}
             />
+            {/* 길찾기(MapRoute)는 일시 비활성 — MapRouteScreen 코드는 유지 */}
+            {/*
             <Stack.Screen
               name="MapRoute"
               component={MapRouteScreen}
@@ -111,6 +113,7 @@ export function RootNavigator() {
                 animation: 'slide_from_right',
               }}
             />
+            */}
             <Stack.Screen
               name="DiaryCamera"
               component={DiaryCameraScreen}

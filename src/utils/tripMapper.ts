@@ -28,7 +28,9 @@ export async function mergeTripWithLocal(
     createdAt: trip.startedAt,
     endedAt: trip.endedAt,
     status: toDiaryStatus(trip.status),
-    editStatus: trip.editStatus ?? local?.editStatus ?? null,
+    editStatus:
+      trip.editStatus ??
+      (toDiaryStatus(trip.status) === 'completed' ? 'COMPLETED' : 'DRAFT'),
     updatedAt: trip.updatedAt ?? local?.updatedAt ?? null,
     likeCount: trip.likeCount ?? local?.likeCount ?? 0,
     commentCount: trip.commentCount ?? local?.commentCount ?? 0,

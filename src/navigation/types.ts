@@ -28,6 +28,7 @@ export type RootStackParamList = {
   CreateDiary: undefined;
   FestivalList: undefined;
   TravelSubsidy: undefined;
+  /** 스택에서 제외됨 — MapRouteScreen 복구용으로만 유지 */
   MapRoute: { placeId: string };
   AICourseCreate: undefined;
   AICourseLoading: { input: CreateAiCourseInput };
@@ -43,7 +44,7 @@ export type RootStackParamList = {
     captureLandscape?: boolean;
   };
   DiaryPhotoGallery: { diaryId: string };
-  DiaryEdit: { diaryId: string; placeId?: string };
+  DiaryEdit: { diaryId: string; placeId?: string; mode?: 'edit' | 'view' };
   DiaryPlacePick: { diaryId: string };
   DiaryCoverEdit: { diaryId: string; fromTripEnd?: boolean };
   DiaryDailyCourseMap: { diaryId: string; dayNumber?: number };

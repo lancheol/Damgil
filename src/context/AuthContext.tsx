@@ -10,7 +10,12 @@ import {
 
 import { deleteAccount as deleteAccountRequest } from '../api/account';
 import { login as loginRequest, logout as logoutRequest, signup as signupRequest } from '../api/auth';
-import { clearTokens, loadTokens, saveTokens } from '../api/tokenStorage';
+import {
+  clearTokens,
+  loadTokens,
+  saveTokens,
+  subscribeToTokenClear,
+} from '../api/tokenStorage';
 import { ApiError, AgreementsPayload, MeResponse } from '../api/types';
 import { getMe, updateMe } from '../api/users';
 import { loadAvatarUri, saveAvatarUri } from '../utils/profileStorage';
@@ -111,6 +116,8 @@ export function AuthProvider({ children }: PropsWithChildren) {
   const [user, setUser] = useState<AuthUser | null>(null);
   const [isReady, setIsReady] = useState(false);
 
+  useEffect(() => subscribeToTokenClear(() => setUser(null)), []);
+
   useEffect(() => {
     let cancelled = false;
 
@@ -124,8 +131,12 @@ export function AuthProvider({ children }: PropsWithChildren) {
         if (!cancelled) {
           setUser(await withStoredAvatar(toAuthUser(me)));
         }
-      } catch {
-        await clearTokens();
+      } catch (error) {
+        // 네트워크 일시 오류에는 refresh 토큰을 보존한다.
+        // refresh까지 거부된 401만 확정 로그아웃으로 처리한다.
+        if (error instanceof ApiError && error.status === 401) {
+          await clearTokens();
+        }
       } finally {
         if (!cancelled) {
           setIsReady(true);

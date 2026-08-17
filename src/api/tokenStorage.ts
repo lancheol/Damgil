@@ -4,6 +4,7 @@ import { TokenPair } from './types';
 
 const ACCESS_KEY = '@damgil/auth/access';
 const REFRESH_KEY = '@damgil/auth/refresh';
+const clearListeners = new Set<() => void>();
 
 export async function saveTokens(tokens: TokenPair): Promise<void> {
   await AsyncStorage.multiSet([
@@ -22,4 +23,12 @@ export async function loadTokens(): Promise<TokenPair | null> {
 
 export async function clearTokens(): Promise<void> {
   await AsyncStorage.multiRemove([ACCESS_KEY, REFRESH_KEY]);
+  clearListeners.forEach((listener) => listener());
+}
+
+export function subscribeToTokenClear(listener: () => void): () => void {
+  clearListeners.add(listener);
+  return () => {
+    clearListeners.delete(listener);
+  };
 }

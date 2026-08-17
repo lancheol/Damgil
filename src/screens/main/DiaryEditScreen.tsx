@@ -50,6 +50,7 @@ import {
 import { createTextLayer } from '../../utils/diaryTextLayers';
 import { buildDiaryTimeline } from '../../utils/diaryTimeline';
 import { getCoverBackgroundColor, getEffectiveCover } from '../../utils/diaryCover';
+import { isDiaryPublished } from '../../utils/tripStatus';
 import { colors, radii, spacing, typography } from '../../theme';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'DiaryEdit'>;
@@ -67,6 +68,8 @@ export function DiaryEditScreen({ navigation, route }: Props) {
   const { getDiaryById, savePlaceSelections, savePlacePageDecoration, addPhotoToDiary, syncDiaryTimeline, syncDiaryEditor, completeDiary, removePhotosFromDiary } =
     useDiaries();
   const diary = getDiaryById(diaryId);
+  const readOnly =
+    route.params.mode === 'view' || isDiaryPublished(diary);
 
   useEffect(() => {
     void (async () => {
@@ -174,6 +177,9 @@ export function DiaryEditScreen({ navigation, route }: Props) {
   }, []);
 
   const persistCurrent = useCallback(async () => {
+    if (readOnly) {
+      return true;
+    }
     const place = activePlaceRef.current;
     if (!place) {
       return true;
@@ -192,7 +198,7 @@ export function DiaryEditScreen({ navigation, route }: Props) {
       setDirty(false);
     }
     return ok;
-  }, [diaryId, savePlacePageDecoration]);
+  }, [diaryId, readOnly, savePlacePageDecoration]);
 
   const placesForDayKey = useCallback(
     (dateKey: string) => {
@@ -573,18 +579,47 @@ export function DiaryEditScreen({ navigation, route }: Props) {
   };
 
   const handleDone = () => {
-    void (async () => {
-      if (dirtyRef.current && !(await persistCurrent())) {
-        Alert.alert('저장 실패', '페이지를 저장하지 못했어요.');
-        return;
-      }
-      if (await completeDiary(diaryId)) {
-        navigation.goBack();
-      }
-    })();
+    if (readOnly) {
+      navigation.goBack();
+      return;
+    }
+    Alert.alert('다이어리 게시', '완료하면 게시물로 올라가요. 공개 범위를 선택해 주세요.', [
+      { text: '취소', style: 'cancel' },
+      {
+        text: '비공개로 게시',
+        onPress: () => {
+          void (async () => {
+            if (dirtyRef.current && !(await persistCurrent())) {
+              Alert.alert('저장 실패', '페이지를 저장하지 못했어요.');
+              return;
+            }
+            if (await completeDiary(diaryId, 'private')) {
+              navigation.goBack();
+            }
+          })();
+        },
+      },
+      {
+        text: '공개로 게시',
+        onPress: () => {
+          void (async () => {
+            if (dirtyRef.current && !(await persistCurrent())) {
+              Alert.alert('저장 실패', '페이지를 저장하지 못했어요.');
+              return;
+            }
+            if (await completeDiary(diaryId, 'public')) {
+              navigation.goBack();
+            }
+          })();
+        },
+      },
+    ]);
   };
 
   const handleEditCover = () => {
+    if (readOnly) {
+      return;
+    }
     void (async () => {
       if (dirtyRef.current && !(await persistCurrent())) {
         Alert.alert('저장 실패', '페이지를 저장하지 못했어요.');
@@ -595,7 +630,7 @@ export function DiaryEditScreen({ navigation, route }: Props) {
   };
 
   const handleBack = () => {
-    if (!dirtyRef.current) {
+    if (readOnly || !dirtyRef.current) {
       navigation.goBack();
       return;
     }
@@ -636,19 +671,25 @@ export function DiaryEditScreen({ navigation, route }: Props) {
     <SafeAreaView style={styles.safe} edges={['top']}>
       <View style={styles.topBar}>
         <BackButton onPress={handleBack} />
-        <Text style={styles.screenTitle}>다이어리 꾸미기</Text>
-        <Pressable
-          accessibilityRole="button"
-          accessibilityLabel="표지 꾸미기"
-          onPress={handleEditCover}
-          style={({ pressed }) => [styles.coverChip, pressed && styles.pressed]}
-        >
-          <Ionicons name="book-outline" size={14} color={colors.ink} />
-          <Text style={styles.coverChipText}>표지</Text>
-        </Pressable>
-        <Pressable onPress={handleDone} style={({ pressed }) => [styles.doneChip, pressed && styles.pressed]}>
-          <Text style={styles.doneChipText}>완료</Text>
-        </Pressable>
+        <Text style={styles.screenTitle}>{readOnly ? '다이어리' : '다이어리 꾸미기'}</Text>
+        {!readOnly ? (
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel="표지 꾸미기"
+            onPress={handleEditCover}
+            style={({ pressed }) => [styles.coverChip, pressed && styles.pressed]}
+          >
+            <Ionicons name="book-outline" size={14} color={colors.ink} />
+            <Text style={styles.coverChipText}>표지</Text>
+          </Pressable>
+        ) : (
+          <View style={styles.headerSpacer} />
+        )}
+        {!readOnly ? (
+          <Pressable onPress={handleDone} style={({ pressed }) => [styles.doneChip, pressed && styles.pressed]}>
+            <Text style={styles.doneChipText}>게시</Text>
+          </Pressable>
+        ) : null}
       </View>
 
       <View style={styles.body}>
@@ -687,102 +728,172 @@ export function DiaryEditScreen({ navigation, route }: Props) {
             hideSpineRidges
             hidePageEdge
           >
-            <View style={styles.pageWrap}>
+            <View style={styles.pageWrap} pointerEvents={readOnly ? 'box-none' : 'auto'}>
+              <View style={styles.pageCanvasHost} pointerEvents={readOnly ? 'none' : 'auto'}>
               <DiaryPageCanvas
                 style={styles.pageCanvas}
                 photos={photos}
                 photoById={photoById}
                 stickers={stickers}
                 texts={texts}
-                selectedPhotoId={selectedPhotoId}
-                selectedStickerId={selectedStickerId}
-                selectedTextId={selectedTextId}
-                onBackgroundPress={clearSelection}
-                onSelectPhoto={(id) => {
-                  setSelectedPhotoId(id);
-                  setSelectedStickerId(null);
-                  setSelectedTextId(null);
-                }}
-                onSelectSticker={(id) => {
-                  setSelectedStickerId(id);
-                  setSelectedPhotoId(null);
-                  setSelectedTextId(null);
-                }}
-                onSelectText={(id) => {
-                  setSelectedTextId(id);
-                  setSelectedPhotoId(null);
-                  setSelectedStickerId(null);
-                }}
-                onEditText={openEditText}
-                onMovePhoto={(id, x, y) => {
-                  setPhotos((prev) => prev.map((item) => (item.id === id ? { ...item, x, y } : item)));
-                  markDirty();
-                }}
-                onScalePhoto={(id, scale) => {
-                  setPhotos((prev) =>
-                    prev.map((item) => (item.id === id ? { ...item, scale } : item)),
-                  );
-                  markDirty();
-                }}
-                onRotatePhoto={(id, rotation) => {
-                  setPhotos((prev) =>
-                    prev.map((item) => (item.id === id ? { ...item, rotation } : item)),
-                  );
-                  markDirty();
-                }}
-                onMoveSticker={(id, x, y) => {
-                  setStickers((prev) =>
-                    prev.map((item) => (item.id === id ? { ...item, x, y } : item)),
-                  );
-                  markDirty();
-                }}
-                onScaleSticker={(id, scale) => {
-                  setStickers((prev) =>
-                    prev.map((item) => (item.id === id ? { ...item, scale } : item)),
-                  );
-                  markDirty();
-                }}
-                onRotateSticker={(id, rotation) => {
-                  setStickers((prev) =>
-                    prev.map((item) => (item.id === id ? { ...item, rotation } : item)),
-                  );
-                  markDirty();
-                }}
-                onMoveText={(id, x, y) => {
-                  setTexts((prev) => prev.map((item) => (item.id === id ? { ...item, x, y } : item)));
-                  markDirty();
-                }}
-                onScaleText={(id, scale) => {
-                  setTexts((prev) =>
-                    prev.map((item) => (item.id === id ? { ...item, scale } : item)),
-                  );
-                  markDirty();
-                }}
-                onRotateText={(id, rotation) => {
-                  setTexts((prev) =>
-                    prev.map((item) => (item.id === id ? { ...item, rotation } : item)),
-                  );
-                  markDirty();
-                }}
-                onLayerDragChange={(dragging) => {
-                  setDraggingLayer(dragging);
-                  if (dragging) {
-                    requestAnimationFrame(() => {
-                      measureDeleteChip();
-                      requestAnimationFrame(measureDeleteChip);
-                    });
-                  }
-                }}
-                onLayerDragPointer={(pageX, pageY) => {
-                  if (deleteHitRef.current.width <= 0) {
-                    measureDeleteChip();
-                  }
-                  setTrashHotState(shouldDeleteAtPoint(pageX, pageY));
-                }}
-                onPhotoDragEnd={(id, pageX, pageY) => handleDragEnd('photo', id, pageX, pageY)}
-                onStickerDragEnd={(id, pageX, pageY) => handleDragEnd('sticker', id, pageX, pageY)}
-                onTextDragEnd={(id, pageX, pageY) => handleDragEnd('text', id, pageX, pageY)}
+                selectedPhotoId={readOnly ? null : selectedPhotoId}
+                selectedStickerId={readOnly ? null : selectedStickerId}
+                selectedTextId={readOnly ? null : selectedTextId}
+                onBackgroundPress={readOnly ? undefined : clearSelection}
+                onSelectPhoto={
+                  readOnly
+                    ? undefined
+                    : (id) => {
+                        setSelectedPhotoId(id);
+                        setSelectedStickerId(null);
+                        setSelectedTextId(null);
+                      }
+                }
+                onSelectSticker={
+                  readOnly
+                    ? undefined
+                    : (id) => {
+                        setSelectedStickerId(id);
+                        setSelectedPhotoId(null);
+                        setSelectedTextId(null);
+                      }
+                }
+                onSelectText={
+                  readOnly
+                    ? undefined
+                    : (id) => {
+                        setSelectedTextId(id);
+                        setSelectedPhotoId(null);
+                        setSelectedStickerId(null);
+                      }
+                }
+                onEditText={readOnly ? undefined : openEditText}
+                onMovePhoto={
+                  readOnly
+                    ? undefined
+                    : (id, x, y) => {
+                        setPhotos((prev) => prev.map((item) => (item.id === id ? { ...item, x, y } : item)));
+                        markDirty();
+                      }
+                }
+                onScalePhoto={
+                  readOnly
+                    ? undefined
+                    : (id, scale) => {
+                        setPhotos((prev) =>
+                          prev.map((item) => (item.id === id ? { ...item, scale } : item)),
+                        );
+                        markDirty();
+                      }
+                }
+                onRotatePhoto={
+                  readOnly
+                    ? undefined
+                    : (id, rotation) => {
+                        setPhotos((prev) =>
+                          prev.map((item) => (item.id === id ? { ...item, rotation } : item)),
+                        );
+                        markDirty();
+                      }
+                }
+                onMoveSticker={
+                  readOnly
+                    ? undefined
+                    : (id, x, y) => {
+                        setStickers((prev) =>
+                          prev.map((item) => (item.id === id ? { ...item, x, y } : item)),
+                        );
+                        markDirty();
+                      }
+                }
+                onScaleSticker={
+                  readOnly
+                    ? undefined
+                    : (id, scale) => {
+                        setStickers((prev) =>
+                          prev.map((item) => (item.id === id ? { ...item, scale } : item)),
+                        );
+                        markDirty();
+                      }
+                }
+                onRotateSticker={
+                  readOnly
+                    ? undefined
+                    : (id, rotation) => {
+                        setStickers((prev) =>
+                          prev.map((item) => (item.id === id ? { ...item, rotation } : item)),
+                        );
+                        markDirty();
+                      }
+                }
+                onMoveText={
+                  readOnly
+                    ? undefined
+                    : (id, x, y) => {
+                        setTexts((prev) => prev.map((item) => (item.id === id ? { ...item, x, y } : item)));
+                        markDirty();
+                      }
+                }
+                onScaleText={
+                  readOnly
+                    ? undefined
+                    : (id, scale) => {
+                        setTexts((prev) =>
+                          prev.map((item) => (item.id === id ? { ...item, scale } : item)),
+                        );
+                        markDirty();
+                      }
+                }
+                onRotateText={
+                  readOnly
+                    ? undefined
+                    : (id, rotation) => {
+                        setTexts((prev) =>
+                          prev.map((item) => (item.id === id ? { ...item, rotation } : item)),
+                        );
+                        markDirty();
+                      }
+                }
+                onLayerDragChange={
+                  readOnly
+                    ? undefined
+                    : (dragging) => {
+                        setDraggingLayer(dragging);
+                        if (dragging) {
+                          requestAnimationFrame(() => {
+                            measureDeleteChip();
+                            requestAnimationFrame(measureDeleteChip);
+                          });
+                        }
+                      }
+                }
+                onLayerDragPointer={
+                  readOnly
+                    ? undefined
+                    : (pageX, pageY) => {
+                        if (deleteHitRef.current.width <= 0) {
+                          measureDeleteChip();
+                        }
+                        setTrashHotState(shouldDeleteAtPoint(pageX, pageY));
+                      }
+                }
+                onPhotoDragEnd={
+                  readOnly
+                    ? undefined
+                    : (id, pageX, pageY) => handleDragEnd('photo', id, pageX, pageY)
+                }
+                onStickerDragEnd={
+                  readOnly
+                    ? undefined
+                    : (id, pageX, pageY) => handleDragEnd('sticker', id, pageX, pageY)
+                }
+                onTextDragEnd={
+                  readOnly
+                    ? undefined
+                    : (id, pageX, pageY) => handleDragEnd('text', id, pageX, pageY)
+                }
               />
+              </View>
 
               {showTrash ? (
                 <View
@@ -843,6 +954,8 @@ export function DiaryEditScreen({ navigation, route }: Props) {
         </View>
       </View>
 
+      {!readOnly ? (
+      <>
       <View style={[styles.toolDock, { paddingBottom: Math.max(insets.bottom, 12) }]}>
         <View style={styles.toolRow}>
           <Pressable
@@ -995,6 +1108,10 @@ export function DiaryEditScreen({ navigation, route }: Props) {
           </SafeAreaView>
         </KeyboardAvoidingView>
       </Modal>
+      </>
+      ) : (
+        <View style={{ height: Math.max(insets.bottom, 12) }} />
+      )}
     </SafeAreaView>
   );
 }
@@ -1010,10 +1127,13 @@ const styles = StyleSheet.create({
     gap: spacing.sm,
   },
   screenTitle: {
-    ...typography.brandTitle,
     flex: 1,
+    ...typography.brandTitle,
     fontSize: 18,
     color: colors.ink,
+  },
+  headerSpacer: {
+    width: 64,
   },
   coverChip: {
     flexDirection: 'row',
@@ -1114,6 +1234,9 @@ const styles = StyleSheet.create({
     borderBottomLeftRadius: 2,
     borderTopRightRadius: 22,
     borderBottomRightRadius: 22,
+  },
+  pageCanvasHost: {
+    flex: 1,
   },
   trashChip: {
     position: 'absolute',
