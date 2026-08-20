@@ -1,41 +1,49 @@
 import { Ionicons } from '@expo/vector-icons';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
-import { useState } from 'react';
-import { Alert, Modal, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { useCallback, useState } from 'react';
+import {
+  ActivityIndicator,
+  Alert,
+  Linking,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  Text,
+  View,
+} from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { useFocusEffect } from '@react-navigation/native';
 
-import { BackButton } from '../../components/common/BackButton';
-import { TermsBody } from '../../components/common/TermsBody';
-import { TERMS_CONTENT } from '../../constants/terms';
 import { getAccountDeletionPreview } from '../../api/account';
+import { getSettings, getSettingsDocument } from '../../api/settings';
 import { loadTokens } from '../../api/tokenStorage';
-import { ApiError } from '../../api/types';
+import { ApiError, SettingsMenuItemDto } from '../../api/types';
+import { BackButton } from '../../components/common/BackButton';
 import { useAuth } from '../../context/AuthContext';
-import type { RootStackParamList, TermsType } from '../../navigation/types';
+import type { RootStackParamList } from '../../navigation/types';
 import { colors, radii, spacing } from '../../theme';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'Settings'>;
-
-type SettingsItem = {
-  id: string;
-  label: string;
-  terms?: TermsType;
-};
-
-const SETTINGS_ITEMS: SettingsItem[] = [
-  { id: 'feedback', label: '피드백 보내기' },
-  { id: 'guide', label: '사용 가이드' },
-  { id: 'terms', label: '서비스 이용약관', terms: 'service' },
-  { id: 'privacy', label: '개인정보 처리방침', terms: 'privacy' },
-  { id: 'location', label: '위치기반 서비스 이용약관', terms: 'location' },
-  { id: 'marketing', label: '마케팅 정보 수신 동의', terms: 'marketing' },
-];
 
 const DANGER_RED = '#FB2C36';
 const ROW_LABEL = '#364153';
 const MUTED = '#6A7282';
 const TITLE = '#1E2939';
 const BORDER = '#F3F4F6';
+
+const MENU_LABELS: Record<string, string> = {
+  feedback: '피드백 보내기',
+  guide: '사용 가이드',
+  terms: '서비스 이용약관',
+  privacy_policy: '개인정보 처리방침',
+  logout: '로그아웃',
+  withdrawal: '회원탈퇴',
+};
+
+const FALLBACK_MENU: SettingsMenuItemDto[] = [{ key: 'feedback' }];
+
+const ACCOUNT_MENU_KEYS = new Set(['logout', 'withdrawal']);
+const DOCUMENT_MENU_KEYS = new Set(['guide', 'terms', 'privacy_policy']);
 
 function formatDeletionPreviewMessage(willDelete: Record<string, number>): string {
   const parts = Object.entries(willDelete)
@@ -48,18 +56,99 @@ function formatDeletionPreviewMessage(willDelete: Record<string, number>): strin
   return `삭제 예정: ${parts.join(', ')}\n탈퇴하면 되돌릴 수 없습니다.`;
 }
 
-export function SettingsScreen({}: Props) {
+function getMenuLabel(item: SettingsMenuItemDto): string {
+  return MENU_LABELS[item.key] ?? item.key;
+}
+
+async function openDocumentUrl(url: string): Promise<void> {
+  const trimmed = url.trim();
+  if (!trimmed.startsWith('https://')) {
+    Alert.alert('문서 열기 실패', '유효하지 않은 문서 주소예요.');
+    return;
+  }
+  const canOpen = await Linking.canOpenURL(trimmed);
+  if (!canOpen) {
+    Alert.alert('문서 열기 실패', '문서를 열 수 없어요.');
+    return;
+  }
+  await Linking.openURL(trimmed);
+}
+
+export function SettingsScreen({ navigation }: Props) {
   const insets = useSafeAreaInsets();
   const { signOut, deleteAccount } = useAuth();
-  const [terms, setTerms] = useState<TermsType | null>(null);
+  const [menuItems, setMenuItems] = useState<SettingsMenuItemDto[]>([]);
+  const [menuLoading, setMenuLoading] = useState(true);
+  const [documentBusyKey, setDocumentBusyKey] = useState<string | null>(null);
   const [withdrawBusy, setWithdrawBusy] = useState(false);
 
-  const handleItemPress = (item: SettingsItem) => {
-    if (item.terms) {
-      setTerms(item.terms);
+  const loadMenu = useCallback(async () => {
+    setMenuLoading(true);
+    try {
+      const response = await getSettings();
+      const items = (response.menu ?? []).filter((item) => !ACCOUNT_MENU_KEYS.has(item.key));
+      setMenuItems(items.length > 0 ? items : FALLBACK_MENU);
+    } catch {
+      setMenuItems(FALLBACK_MENU);
+    } finally {
+      setMenuLoading(false);
+    }
+  }, []);
+
+  useFocusEffect(
+    useCallback(() => {
+      void loadMenu();
+    }, [loadMenu]),
+  );
+
+  const handleDocumentPress = async (item: SettingsMenuItemDto) => {
+    if (documentBusyKey) return;
+    const label = getMenuLabel(item);
+    setDocumentBusyKey(item.key);
+    try {
+      let url = item.url?.trim() || null;
+      const documentType =
+        item.documentType?.trim() ||
+        (DOCUMENT_MENU_KEYS.has(item.key) ? item.key : null);
+
+      if (!url && documentType) {
+        try {
+          const document = await getSettingsDocument(documentType);
+          url = document.url?.trim() || null;
+        } catch (error) {
+          if (error instanceof ApiError && error.status === 404) {
+            Alert.alert(label, '아직 게시되지 않은 문서예요.');
+            return;
+          }
+          throw error;
+        }
+      }
+
+      if (!url) {
+        Alert.alert(label, '아직 게시되지 않은 문서예요.');
+        return;
+      }
+
+      await openDocumentUrl(url);
+    } catch (error) {
+      const message =
+        error instanceof ApiError ? error.message : '문서를 열지 못했어요.';
+      Alert.alert('문서 열기 실패', message);
+    } finally {
+      setDocumentBusyKey(null);
+    }
+  };
+
+  const handleItemPress = (item: SettingsMenuItemDto) => {
+    if (item.key === 'feedback') {
+      navigation.navigate('Feedback');
       return;
     }
-    Alert.alert(item.label, '준비 중인 기능입니다.');
+    if (item.documentType || item.url || DOCUMENT_MENU_KEYS.has(item.key)) {
+      void handleDocumentPress(item);
+      return;
+    }
+    Alert.alert(getMenuLabel(item), '준비 중인 기능입니다.');
   };
 
   const handleLogout = () => {
@@ -152,25 +241,38 @@ export function SettingsScreen({}: Props) {
         showsVerticalScrollIndicator={false}
       >
         <View style={styles.card}>
-          {SETTINGS_ITEMS.map((item, index) => {
-            const isLast = index === SETTINGS_ITEMS.length - 1;
-            return (
-              <Pressable
-                key={item.id}
-                onPress={() => handleItemPress(item)}
-                style={({ pressed }) => [
-                  styles.row,
-                  !isLast && styles.rowBorder,
-                  pressed && styles.rowPressed,
-                ]}
-                accessibilityRole="button"
-                accessibilityLabel={item.label}
-              >
-                <Text style={styles.rowLabel}>{item.label}</Text>
-                <Ionicons name="chevron-forward" size={16} color="#99A1AF" />
-              </Pressable>
-            );
-          })}
+          {menuLoading ? (
+            <View style={styles.loadingRow}>
+              <ActivityIndicator color={MUTED} />
+            </View>
+          ) : (
+            menuItems.map((item, index) => {
+              const isLast = index === menuItems.length - 1;
+              const busy = documentBusyKey === item.key;
+              return (
+                <Pressable
+                  key={item.key}
+                  disabled={busy}
+                  onPress={() => handleItemPress(item)}
+                  style={({ pressed }) => [
+                    styles.row,
+                    !isLast && styles.rowBorder,
+                    (pressed || busy) && styles.rowPressed,
+                  ]}
+                  accessibilityRole="button"
+                  accessibilityLabel={getMenuLabel(item)}
+                  accessibilityState={{ disabled: busy }}
+                >
+                  <Text style={styles.rowLabel}>{getMenuLabel(item)}</Text>
+                  {busy ? (
+                    <ActivityIndicator size="small" color={MUTED} />
+                  ) : (
+                    <Ionicons name="chevron-forward" size={16} color="#99A1AF" />
+                  )}
+                </Pressable>
+              );
+            })
+          )}
         </View>
 
         <View style={styles.accountActions}>
@@ -200,37 +302,6 @@ export function SettingsScreen({}: Props) {
           </Pressable>
         </View>
       </ScrollView>
-
-      <Modal
-        visible={terms !== null}
-        animationType="slide"
-        onRequestClose={() => setTerms(null)}
-      >
-        <View style={[styles.screen, { paddingTop: insets.top }]}>
-          <View style={styles.header}>
-            <Pressable
-              accessibilityRole="button"
-              accessibilityLabel="닫기"
-              hitSlop={12}
-              onPress={() => setTerms(null)}
-              style={({ pressed }) => [styles.closeButton, pressed && styles.pressed]}
-            >
-              <Ionicons name="close" size={24} color={TITLE} />
-            </Pressable>
-            <Text style={styles.headerTitle}>{terms ? TERMS_CONTENT[terms].title : ''}</Text>
-          </View>
-
-          <ScrollView
-            contentContainerStyle={[
-              styles.termsContent,
-              { paddingBottom: insets.bottom + spacing.xxl },
-            ]}
-            showsVerticalScrollIndicator={false}
-          >
-            {terms ? <TermsBody body={TERMS_CONTENT[terms].body} /> : null}
-          </ScrollView>
-        </View>
-      </Modal>
     </View>
   );
 }
@@ -253,13 +324,6 @@ const styles = StyleSheet.create({
   backBtn: {
     marginLeft: -spacing.xs,
   },
-  closeButton: {
-    width: 40,
-    height: 40,
-    marginLeft: -spacing.sm,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
   headerTitle: {
     fontSize: 18,
     fontWeight: '600',
@@ -276,6 +340,11 @@ const styles = StyleSheet.create({
     borderRadius: radii.md,
     overflow: 'hidden',
     backgroundColor: colors.white,
+  },
+  loadingRow: {
+    paddingVertical: spacing.xl,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   row: {
     flexDirection: 'row',
@@ -317,10 +386,6 @@ const styles = StyleSheet.create({
     fontWeight: '500',
     color: DANGER_RED,
     lineHeight: 20,
-  },
-  termsContent: {
-    paddingHorizontal: spacing.lg + 4,
-    paddingTop: spacing.lg,
   },
   pressed: {
     opacity: 0.7,

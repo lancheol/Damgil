@@ -39,6 +39,7 @@ function coverFromStickerLayout(
     titleY: typeof layout?.titleY === 'number' ? layout.titleY : 0.5,
     titleScale: typeof layout?.titleScale === 'number' ? layout.titleScale : 1,
     titleRotation: typeof layout?.titleRotation === 'number' ? layout.titleRotation : 0,
+    titleColor: typeof layout?.titleColor === 'string' ? layout.titleColor : undefined,
     stickers,
     photos,
     texts,

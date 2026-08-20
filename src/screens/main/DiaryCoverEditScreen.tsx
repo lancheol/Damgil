@@ -18,7 +18,8 @@ import * as ImagePicker from 'expo-image-picker';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { BackButton } from '../../components/common/BackButton';
-import { ColorWheelPicker, ColorWheelSwatch } from '../../components/common/ColorWheelPicker';
+import { ColorWheelPicker } from '../../components/common/ColorWheelPicker';
+import { RecentColorPaletteRow } from '../../components/common/RecentColorPaletteRow';
 import { CoverCanvas } from '../../components/diary/CoverCanvas';
 import { PhotoCropModal } from '../../components/diary/PhotoCropModal';
 import { HomeBookShell } from '../../components/home/HomeBookShell';
@@ -37,12 +38,9 @@ import {
   createStickerId,
   DECOR_FONTS,
   DECOR_STICKER_EMOJIS,
-  DECOR_TEXT_COLORS,
   DEFAULT_DECOR_TEXT_COLOR,
 } from '../../utils/decorAssets';
-import { isSameColor } from '../../utils/color';
 import {
-  isLightCoverColor,
   loadCoverColorHistory,
   saveCoverColorHistory,
   uniqueColors,
@@ -50,7 +48,6 @@ import {
 import { createDefaultPhotoLayer } from '../../utils/diaryPageDecoration';
 import { createTextLayer } from '../../utils/diaryTextLayers';
 import {
-  COVER_FONTS,
   DEFAULT_COVER_COLOR,
   DEFAULT_COVER_TITLE_X,
   DEFAULT_COVER_TITLE_Y,
@@ -61,15 +58,13 @@ import {
   clampCoverTitleRotation,
   createEmptyCover,
   getCoverBackgroundColor,
+  getCoverTitleColor,
   getEffectiveCover,
 } from '../../utils/diaryCover';
 import { colors, radii, spacing, typography } from '../../theme';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'DiaryCoverEdit'>;
-type ToolSheet = 'none' | 'sticker' | 'text' | 'cover';
-
-const COVER_SWATCH_SIZE = 36;
-const COVER_SWATCH_GAP = 8;
+type ToolSheet = 'none' | 'sticker' | 'text' | 'cover' | 'title';
 
 type HitRect = { x: number; y: number; width: number; height: number };
 
@@ -105,6 +100,9 @@ export function DiaryCoverEditScreen({ navigation, route }: Props) {
   const [titleRotation, setTitleRotation] = useState(
     clampCoverTitleRotation(initial.titleRotation ?? DEFAULT_COVER_TITLE_ROTATION),
   );
+  const [titleColor, setTitleColor] = useState<string | undefined>(
+    initial.titleColor?.trim() || undefined,
+  );
   const [backgroundColor, setBackgroundColor] = useState(
     getCoverBackgroundColor(initial) || DEFAULT_COVER_COLOR,
   );
@@ -122,13 +120,14 @@ export function DiaryCoverEditScreen({ navigation, route }: Props) {
   const [selectedTextId, setSelectedTextId] = useState<string | null>(null);
   const [selectedTitle, setSelectedTitle] = useState(false);
   const [draggingLayer, setDraggingLayer] = useState(false);
+  const [draggingTitle, setDraggingTitle] = useState(false);
   const [trashHot, setTrashHot] = useState(false);
   const [dirty, setDirty] = useState(false);
   const [sheet, setSheet] = useState<ToolSheet>('none');
   const [cropOpen, setCropOpen] = useState(false);
   const [customColorOpen, setCustomColorOpen] = useState(false);
+  const [textCustomColorOpen, setTextCustomColorOpen] = useState(false);
   const [colorHistory, setColorHistory] = useState<string[]>([]);
-  const [colorRowWidth, setColorRowWidth] = useState(0);
 
   const [draftText, setDraftText] = useState('');
   const [draftFontId, setDraftFontId] = useState<DecorFontId>('sans');
@@ -193,13 +192,14 @@ export function DiaryCoverEditScreen({ navigation, route }: Props) {
       titleY,
       titleScale,
       titleRotation,
+      titleColor: titleColor ?? null,
       stickers,
       photos,
       texts,
       backgroundColor,
       updatedAt: new Date().toISOString(),
     };
-  }, [title, fontId, titleX, titleY, titleScale, titleRotation, stickers, photos, texts, backgroundColor, diary?.name]);
+  }, [title, fontId, titleX, titleY, titleScale, titleRotation, titleColor, stickers, photos, texts, backgroundColor, diary?.name]);
 
   // 여행 종료 직후에는 돌아갈 곳이 카메라 플로우라 마이페이지로 보낸다
   const leaveToMyPage = () => {
@@ -375,6 +375,28 @@ export function DiaryCoverEditScreen({ navigation, route }: Props) {
     addPhotoLayer(saved.id);
   };
 
+  const openEditTitle = () => {
+    setSelectedPhotoId(null);
+    setSelectedStickerId(null);
+    setSelectedTextId(null);
+    setSelectedTitle(true);
+    setEditingTextId(null);
+    setDraftText(title.trim() || diary?.name || '');
+    setDraftFontId(fontId);
+    setDraftColor(titleColor ?? getCoverTitleColor(backgroundColor));
+    setSheet('title');
+  };
+
+  const commitTitleDraft = () => {
+    const content = draftText.trim();
+    setTitle(content || diary?.name || '');
+    setFontId(draftFontId);
+    setTitleColor(draftColor);
+    setSelectedTitle(true);
+    setSheet('none');
+    markDirty();
+  };
+
   const openTextTool = () => {
     clearSelection();
     setEditingTextId(null);
@@ -498,18 +520,6 @@ export function DiaryCoverEditScreen({ navigation, route }: Props) {
     });
   };
 
-  const visibleColorHistory = useMemo(() => {
-    if (colorRowWidth <= 0) {
-      return colorHistory.slice(0, 5);
-    }
-    const reserved = COVER_SWATCH_SIZE + COVER_SWATCH_GAP;
-    const slots = Math.max(
-      0,
-      Math.floor((colorRowWidth - reserved + COVER_SWATCH_GAP) / (COVER_SWATCH_SIZE + COVER_SWATCH_GAP)),
-    );
-    return colorHistory.slice(0, slots);
-  }, [colorHistory, colorRowWidth]);
-
   if (!diary) {
     return (
       <SafeAreaView style={styles.safe} edges={['top', 'bottom']}>
@@ -523,7 +533,9 @@ export function DiaryCoverEditScreen({ navigation, route }: Props) {
     );
   }
 
-  const showTrash = draggingLayer && sheet === 'none';
+  const showTrash = draggingLayer && !draggingTitle && sheet === 'none';
+  const displayTitle = title.trim() || diary?.name || '';
+  const resolvedTitleColor = titleColor ?? getCoverTitleColor(backgroundColor);
 
   return (
     <SafeAreaView style={styles.safe} edges={['top']}>
@@ -557,8 +569,9 @@ export function DiaryCoverEditScreen({ navigation, route }: Props) {
                 fill
                 style={styles.coverCanvas}
                 backgroundColor={backgroundColor}
-                title={title}
+                title={displayTitle}
                 fontId={fontId}
+                titleColor={resolvedTitleColor}
                 titleX={titleX}
                 titleY={titleY}
                 titleScale={titleScale}
@@ -578,6 +591,7 @@ export function DiaryCoverEditScreen({ navigation, route }: Props) {
                   setSelectedStickerId(null);
                   setSelectedTextId(null);
                 }}
+                onEditTitle={openEditTitle}
                 onMoveTitle={(x, y) => {
                   setTitleX(x);
                   setTitleY(y);
@@ -674,6 +688,16 @@ export function DiaryCoverEditScreen({ navigation, route }: Props) {
                 onPhotoDragEnd={(id, pageX, pageY) => handleDragEnd('photo', id, pageX, pageY)}
                 onStickerDragEnd={(id, pageX, pageY) => handleDragEnd('sticker', id, pageX, pageY)}
                 onTextDragEnd={(id, pageX, pageY) => handleDragEnd('text', id, pageX, pageY)}
+                onTitleDragChange={(dragging) => {
+                  setDraggingTitle(dragging);
+                  if (!dragging) {
+                    setTrashHotState(false);
+                  }
+                }}
+                onTitleDragEnd={() => {
+                  setTrashHotState(false);
+                  setDraggingTitle(false);
+                }}
               />
 
               {showTrash ? (
@@ -792,81 +816,19 @@ export function DiaryCoverEditScreen({ navigation, route }: Props) {
         <View style={[styles.sheet, { paddingBottom: Math.max(insets.bottom, 16) }]}>
           <View style={styles.sheetHandle} />
           <Text style={styles.sheetTitle}>표지</Text>
-          <TextInput
-            value={title}
-            onChangeText={(text) => {
-              setTitle(text);
+          <RecentColorPaletteRow
+            history={colorHistory}
+            selectedColor={backgroundColor}
+            onSelectColor={(hex) => {
+              setBackgroundColor(hex);
+              rememberColor(hex);
               markDirty();
             }}
-            placeholder="다이어리 제목"
-            placeholderTextColor={colors.placeholder}
-            style={styles.coverTitleInput}
+            onOpenCustom={() => setCustomColorOpen(true)}
+            customAccessibilityLabel="표지 색상 직접 고르기"
+            swatchAccessibilityLabel={(hex) => `사용한 표지 색상 ${hex}`}
+            style={styles.coverPaletteRow}
           />
-          <ScrollView
-            horizontal
-            showsHorizontalScrollIndicator={false}
-            contentContainerStyle={styles.coverFontRow}
-          >
-            {COVER_FONTS.map((font) => {
-              const active = font.id === fontId;
-              return (
-                <Pressable
-                  key={font.id}
-                  onPress={() => {
-                    setFontId(font.id);
-                    markDirty();
-                  }}
-                  style={[styles.coverFontChip, active && styles.coverFontChipActive]}
-                >
-                  <Text
-                    style={[
-                      styles.coverFontChipText,
-                      font.style,
-                      active && styles.coverFontChipTextActive,
-                    ]}
-                  >
-                    {font.label}
-                  </Text>
-                </Pressable>
-              );
-            })}
-          </ScrollView>
-          <View
-            style={styles.coverColorRow}
-            onLayout={(event) => setColorRowWidth(event.nativeEvent.layout.width)}
-          >
-            {visibleColorHistory.map((swatch) => {
-              const active = isSameColor(backgroundColor, swatch);
-              return (
-                <Pressable
-                  key={swatch}
-                  onPress={() => {
-                    setBackgroundColor(swatch);
-                    rememberColor(swatch);
-                    markDirty();
-                  }}
-                  style={[
-                    styles.coverColorSwatch,
-                    { backgroundColor: swatch },
-                    active && styles.coverColorSwatchActive,
-                    isLightCoverColor(swatch) && styles.coverColorSwatchBorder,
-                  ]}
-                  accessibilityRole="button"
-                  accessibilityState={{ selected: active }}
-                  accessibilityLabel={`사용한 표지 색상 ${swatch}`}
-                />
-              );
-            })}
-
-            <Pressable
-              onPress={() => setCustomColorOpen(true)}
-              style={[styles.coverColorSwatch, styles.coverColorCustom]}
-              accessibilityRole="button"
-              accessibilityLabel="표지 색상 직접 고르기"
-            >
-              <ColorWheelSwatch size={32} />
-            </Pressable>
-          </View>
         </View>
 
         {customColorOpen ? (
@@ -884,10 +846,14 @@ export function DiaryCoverEditScreen({ navigation, route }: Props) {
       </Modal>
 
       <Modal
-        visible={sheet === 'text'}
+        visible={sheet === 'text' || sheet === 'title'}
         transparent
         animationType="fade"
         onRequestClose={() => {
+          if (sheet === 'title') {
+            commitTitleDraft();
+            return;
+          }
           setSheet('none');
           setEditingTextId(null);
         }}
@@ -896,7 +862,10 @@ export function DiaryCoverEditScreen({ navigation, route }: Props) {
           style={styles.textModalRoot}
           behavior={Platform.OS === 'ios' ? 'padding' : undefined}
         >
-          <Pressable style={styles.textModalDim} onPress={commitTextDraft} />
+          <Pressable
+            style={styles.textModalDim}
+            onPress={sheet === 'title' ? commitTitleDraft : commitTextDraft}
+          />
           <View style={styles.textComposer}>
             <View style={styles.textField}>
               <Text
@@ -908,11 +877,13 @@ export function DiaryCoverEditScreen({ navigation, route }: Props) {
                   { color: draftColor },
                 ]}
               >
-                {draftText}
+                {draftText || (sheet === 'title' ? '제목 없음' : '')}
               </Text>
               <TextInput
                 value={draftText}
                 onChangeText={setDraftText}
+                placeholder={sheet === 'title' ? '다이어리 제목' : undefined}
+                placeholderTextColor={colors.placeholder}
                 style={[styles.textInput, styles.textInputHit, { color: 'transparent' }]}
                 selectionColor={draftColor}
                 cursorColor={draftColor}
@@ -923,24 +894,19 @@ export function DiaryCoverEditScreen({ navigation, route }: Props) {
             </View>
           </View>
           <SafeAreaView edges={['bottom']} style={styles.fontBarWrap}>
-            <ScrollView
-              horizontal
-              showsHorizontalScrollIndicator={false}
-              contentContainerStyle={styles.colorBar}
-            >
-              {DECOR_TEXT_COLORS.map((swatch) => (
-                <Pressable key={swatch} onPress={() => setDraftColor(swatch)} style={styles.colorDotHit}>
-                  <View
-                    style={[
-                      styles.colorDot,
-                      { backgroundColor: swatch },
-                      swatch === '#FFFFFF' && styles.colorDotLight,
-                      swatch === draftColor && styles.colorDotActive,
-                    ]}
-                  />
-                </Pressable>
-              ))}
-            </ScrollView>
+            <RecentColorPaletteRow
+              history={colorHistory}
+              selectedColor={draftColor}
+              tone="onDark"
+              onSelectColor={(hex) => {
+                setDraftColor(hex);
+                rememberColor(hex);
+              }}
+              onOpenCustom={() => setTextCustomColorOpen(true)}
+              customAccessibilityLabel="텍스트 색상 직접 고르기"
+              swatchAccessibilityLabel={(hex) => `사용한 텍스트 색상 ${hex}`}
+              style={styles.textPaletteRow}
+            />
             <ScrollView
               horizontal
               showsHorizontalScrollIndicator={false}
@@ -964,6 +930,18 @@ export function DiaryCoverEditScreen({ navigation, route }: Props) {
           </SafeAreaView>
         </KeyboardAvoidingView>
       </Modal>
+
+      {(sheet === 'text' || sheet === 'title') && textCustomColorOpen ? (
+        <ColorWheelPicker
+          initialColor={draftColor}
+          onCancel={() => setTextCustomColorOpen(false)}
+          onConfirm={(hex) => {
+            setDraftColor(hex);
+            rememberColor(hex);
+            setTextCustomColorOpen(false);
+          }}
+        />
+      ) : null}
     </SafeAreaView>
   );
 }
@@ -1125,31 +1103,8 @@ const styles = StyleSheet.create({
   coverFontChipTextActive: {
     color: colors.white,
   },
-  coverColorRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'flex-end',
-    gap: COVER_SWATCH_GAP,
+  coverPaletteRow: {
     paddingBottom: spacing.xs,
-  },
-  coverColorSwatch: {
-    width: COVER_SWATCH_SIZE,
-    height: COVER_SWATCH_SIZE,
-    borderRadius: radii.pill,
-    borderWidth: 2,
-    borderColor: 'transparent',
-  },
-  coverColorSwatchBorder: {
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: '#D1D5DB',
-  },
-  coverColorCustom: {
-    alignItems: 'center',
-    justifyContent: 'center',
-    overflow: 'hidden',
-  },
-  coverColorSwatchActive: {
-    borderColor: colors.black,
   },
   textModalRoot: { flex: 1 },
   textModalDim: { ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(0,0,0,0.72)' },
@@ -1163,11 +1118,9 @@ const styles = StyleSheet.create({
     paddingVertical: spacing.md,
     gap: spacing.sm,
   },
-  colorBar: { paddingHorizontal: spacing.lg, gap: spacing.sm },
-  colorDotHit: { padding: 4 },
-  colorDot: { width: 28, height: 28, borderRadius: 14 },
-  colorDotLight: { borderWidth: StyleSheet.hairlineWidth, borderColor: '#D4D4D4' },
-  colorDotActive: { borderWidth: 2, borderColor: colors.white },
+  textPaletteRow: {
+    paddingHorizontal: spacing.lg,
+  },
   fontBar: { paddingHorizontal: spacing.lg, gap: spacing.sm },
   fontChip: {
     paddingHorizontal: spacing.md,

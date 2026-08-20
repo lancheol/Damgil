@@ -3,7 +3,7 @@ import { Image, StyleSheet, View, ViewStyle } from 'react-native';
 
 import { CoverCanvas } from './CoverCanvas';
 import { Diary, DiaryPhoto } from '../../types/diary';
-import { getCoverBackgroundColor, getEffectiveCover } from '../../utils/diaryCover';
+import { getCoverBackgroundColor, getEffectiveCover, resolveCoverTitleColor } from '../../utils/diaryCover';
 
 type CoverThumbProps = {
   diary?: Diary | null;
@@ -49,6 +49,7 @@ export function CoverThumb({ diary, style, fill = true }: CoverThumbProps) {
         titleY={cover.titleY}
         titleScale={cover.titleScale}
         titleRotation={cover.titleRotation}
+        titleColor={resolveCoverTitleColor(cover, getCoverBackgroundColor(cover))}
         photos={cover.photos ?? []}
         photoById={photoById}
         stickers={cover.stickers ?? []}

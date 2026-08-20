@@ -18,6 +18,10 @@ type Props = {
   layoutRef: MutableRefObject<{ width: number; height: number }>;
   onSelect: () => void;
   onMove: (x: number, y: number) => void;
+  onEditRequest?: () => void;
+  onDragChange?: (dragging: boolean) => void;
+  onDragPointer?: (pageX: number, pageY: number) => void;
+  onDragEnd?: (pageX?: number, pageY?: number) => void;
 };
 
 export function DraggableCoverTitle({
@@ -33,15 +37,31 @@ export function DraggableCoverTitle({
   layoutRef,
   onSelect,
   onMove,
+  onEditRequest,
+  onDragChange,
+  onDragPointer,
+  onDragEnd,
 }: Props) {
   const posRef = useRef({ x, y });
   posRef.current = { x, y };
   const [box, setBox] = useState({ width: 160, height: 48 });
   const lastPageRef = useRef({ x: 0, y: 0 });
+  const movedRef = useRef(false);
+
   const onSelectRef = useRef(onSelect);
   const onMoveRef = useRef(onMove);
+  const onEditRequestRef = useRef(onEditRequest);
+  const onDragChangeRef = useRef(onDragChange);
+  const onDragPointerRef = useRef(onDragPointer);
+  const onDragEndRef = useRef(onDragEnd);
+  const selectedRef = useRef(selected);
   onSelectRef.current = onSelect;
   onMoveRef.current = onMove;
+  onEditRequestRef.current = onEditRequest;
+  onDragChangeRef.current = onDragChange;
+  onDragPointerRef.current = onDragPointer;
+  onDragEndRef.current = onDragEnd;
+  selectedRef.current = selected;
 
   const panResponder = useRef(
     PanResponder.create({
@@ -54,18 +74,46 @@ export function DraggableCoverTitle({
       onPanResponderGrant: (event: GestureResponderEvent) => {
         const { pageX, pageY } = event.nativeEvent;
         lastPageRef.current = { x: pageX, y: pageY };
+        movedRef.current = false;
+        onDragChangeRef.current?.(true);
+        onDragPointerRef.current?.(pageX, pageY);
         onSelectRef.current();
       },
       onPanResponderMove: (event: GestureResponderEvent) => {
         const { pageX, pageY } = event.nativeEvent;
+        onDragPointerRef.current?.(pageX, pageY);
         const { width, height } = layoutRef.current;
         const dx = (pageX - lastPageRef.current.x) / Math.max(width, 1);
         const dy = (pageY - lastPageRef.current.y) / Math.max(height, 1);
+        if (Math.abs(dx) > 0.002 || Math.abs(dy) > 0.002) {
+          movedRef.current = true;
+        }
         lastPageRef.current = { x: pageX, y: pageY };
         onMoveRef.current(
           Math.min(0.92, Math.max(0.08, posRef.current.x + dx)),
           Math.min(0.92, Math.max(0.08, posRef.current.y + dy)),
         );
+      },
+      onPanResponderRelease: (event) => {
+        const { pageX, pageY } = event.nativeEvent;
+        const wasSelected = selectedRef.current;
+        const didMove = movedRef.current;
+        onDragPointerRef.current?.(pageX, pageY);
+        onDragEndRef.current?.(pageX, pageY);
+        onDragChangeRef.current?.(false);
+        if (wasSelected && !didMove) {
+          onEditRequestRef.current?.();
+        }
+      },
+      onPanResponderTerminate: (event) => {
+        const { pageX, pageY } = event.nativeEvent;
+        if (typeof pageX === 'number' && typeof pageY === 'number') {
+          onDragPointerRef.current?.(pageX, pageY);
+          onDragEndRef.current?.(pageX, pageY);
+        } else {
+          onDragEndRef.current?.();
+        }
+        onDragChangeRef.current?.(false);
       },
     }),
   ).current;

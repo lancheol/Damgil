@@ -36,6 +36,8 @@ export type DiaryCover = {
   /** 표지 제목 크기·회전 (스티커와 동일 제스처) */
   titleScale?: number;
   titleRotation?: number;
+  /** 표지 제목 색 (미설정 시 배경색 대비 자동) */
+  titleColor?: string | null;
   stickers: DecorSticker[];
   /** 표지 위 자유 배치 사진 레이어 */
   photos?: DecorPhotoLayer[];

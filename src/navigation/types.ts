@@ -24,6 +24,7 @@ export type RootStackParamList = {
   Auth: undefined;
   Main: NavigatorScreenParams<MainTabParamList> | undefined;
   Settings: undefined;
+  Feedback: undefined;
   ProfileEdit: undefined;
   CreateDiary: undefined;
   FestivalList: undefined;

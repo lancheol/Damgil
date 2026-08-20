@@ -714,6 +714,7 @@ export function DiaryProvider({ children }: PropsWithChildren) {
               titleY: nextCover.titleY,
               titleScale: nextCover.titleScale,
               titleRotation: nextCover.titleRotation,
+              titleColor: nextCover.titleColor ?? null,
               backgroundColor: nextCover.backgroundColor,
               stickers: nextCover.stickers,
               photos: nextCover.photos,

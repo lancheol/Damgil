@@ -19,7 +19,7 @@ import {
   DEFAULT_COVER_TITLE_Y,
   DEFAULT_COVER_TITLE_SCALE,
   DEFAULT_COVER_TITLE_ROTATION,
-  getCoverTitleColor,
+  resolveCoverTitleColor,
 } from '../../utils/diaryCover';
 
 type CoverCanvasProps = {
@@ -30,6 +30,7 @@ type CoverCanvasProps = {
   titleY?: number;
   titleScale?: number;
   titleRotation?: number;
+  titleColor?: string;
   photos: DecorPhotoLayer[];
   photoById: Record<string, DiaryPhoto | undefined>;
   stickers: DecorSticker[];
@@ -47,6 +48,7 @@ type CoverCanvasProps = {
   onSelectSticker?: (id: string) => void;
   onSelectText?: (id: string) => void;
   onSelectTitle?: () => void;
+  onEditTitle?: () => void;
   onMoveTitle?: (x: number, y: number) => void;
   onScaleTitle?: (scale: number) => void;
   onRotateTitle?: (rotation: number) => void;
@@ -65,6 +67,9 @@ type CoverCanvasProps = {
   onPhotoDragEnd?: (id: string, pageX?: number, pageY?: number) => void;
   onStickerDragEnd?: (id: string, pageX?: number, pageY?: number) => void;
   onTextDragEnd?: (id: string, pageX?: number, pageY?: number) => void;
+  onTitleDragChange?: (dragging: boolean) => void;
+  onTitleDragPointer?: (pageX: number, pageY: number) => void;
+  onTitleDragEnd?: (pageX?: number, pageY?: number) => void;
 };
 
 export function CoverCanvas({
@@ -75,6 +80,7 @@ export function CoverCanvas({
   titleY = DEFAULT_COVER_TITLE_Y,
   titleScale = DEFAULT_COVER_TITLE_SCALE,
   titleRotation = DEFAULT_COVER_TITLE_ROTATION,
+  titleColor,
   photos = [],
   photoById,
   stickers = [],
@@ -91,6 +97,7 @@ export function CoverCanvas({
   onSelectSticker,
   onSelectText,
   onSelectTitle,
+  onEditTitle,
   onMoveTitle,
   onScaleTitle,
   onRotateTitle,
@@ -109,6 +116,9 @@ export function CoverCanvas({
   onPhotoDragEnd,
   onStickerDragEnd,
   onTextDragEnd,
+  onTitleDragChange,
+  onTitleDragPointer,
+  onTitleDragEnd,
 }: CoverCanvasProps) {
   const layoutRef = useRef({ width: 1, height: 1 });
   const photosRef = useRef(photos);
@@ -118,7 +128,8 @@ export function CoverCanvas({
   stickersRef.current = stickers;
   textsRef.current = texts;
 
-  const titleColor = getCoverTitleColor(backgroundColor);
+  const resolvedTitleColor =
+    titleColor?.trim() || resolveCoverTitleColor({ backgroundColor }, backgroundColor);
   const titleScaleRef = useRef(titleScale);
   const titleRotationRef = useRef(titleRotation);
   titleScaleRef.current = titleScale;
@@ -263,7 +274,7 @@ export function CoverCanvas({
       <DraggableCoverTitle
         title={title}
         fontId={fontId}
-        color={titleColor}
+        color={resolvedTitleColor}
         x={titleX}
         y={titleY}
         scale={titleScale}
@@ -272,7 +283,11 @@ export function CoverCanvas({
         editable={editable}
         layoutRef={layoutRef}
         onSelect={() => onSelectTitle?.()}
+        onEditRequest={() => onEditTitle?.()}
         onMove={(nextX, nextY) => onMoveTitle?.(nextX, nextY)}
+        onDragChange={onTitleDragChange}
+        onDragPointer={onTitleDragPointer}
+        onDragEnd={(pageX, pageY) => onTitleDragEnd?.(pageX, pageY)}
       />
     </View>
   );

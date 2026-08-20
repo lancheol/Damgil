@@ -315,6 +315,56 @@ export type SavedPlaceItemDto = {
   place: PlaceCacheSummaryDto | null;
 };
 
+/** POST /settings/feedback */
+export type FeedbackType =
+  | 'service_opinion'
+  | 'feature_request'
+  | 'bug_report'
+  | 'other';
+
+export type CreateFeedbackRequest = {
+  type: FeedbackType;
+  content: string;
+};
+
+export type FeedbackResponseDto = {
+  feedbackId: string;
+  type: string;
+  createdAt: string;
+};
+
+/** GET /settings */
+export type SettingsMenuKey =
+  | 'feedback'
+  | 'guide'
+  | 'terms'
+  | 'privacy_policy'
+  | 'logout'
+  | 'withdrawal'
+  | (string & {});
+
+export type SettingsMenuItemDto = {
+  key: SettingsMenuKey;
+  documentType?: string | null;
+  version?: string | null;
+  url?: string | null;
+};
+
+export type SettingsResponseDto = {
+  menu: SettingsMenuItemDto[];
+};
+
+/** GET /settings/documents/{documentType} */
+export type ServiceDocumentDto = {
+  id: string;
+  documentType: string;
+  version: string;
+  url: string;
+  effectiveAt: string;
+  isActive: boolean;
+  createdAt: string;
+};
+
 /** GET /public/trips · /public/trips/{id} — Swagger 스키마 비어 있어 라이브 응답 기준 */
 export type PublicTripListItemDto = TripDto & {
   updatedAt?: string;

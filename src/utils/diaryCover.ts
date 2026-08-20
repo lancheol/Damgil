@@ -124,6 +124,18 @@ export function getCoverBackgroundColor(cover?: DiaryCover | null): string {
   return cover?.backgroundColor?.trim() || DEFAULT_COVER_COLOR;
 }
 
+export function resolveCoverTitleColor(
+  cover: Pick<DiaryCover, 'titleColor' | 'backgroundColor'> | null | undefined,
+  backgroundColor?: string,
+): string {
+  const explicit = cover?.titleColor?.trim();
+  if (explicit) {
+    return explicit;
+  }
+  const bg = backgroundColor ?? getCoverBackgroundColor(cover as DiaryCover | null | undefined);
+  return getCoverTitleColor(bg);
+}
+
 /** 밝은 배경이면 어두운 글자 */
 export function getCoverTitleColor(backgroundColor: string): string {
   const hex = backgroundColor.replace('#', '');
@@ -153,6 +165,10 @@ export function normalizeCover(cover: DiaryCover | null | undefined, fallbackTit
     titleY: clampCoverTitleAxis(cover.titleY, DEFAULT_COVER_TITLE_Y),
     titleScale: clampCoverTitleScale(cover.titleScale),
     titleRotation: clampCoverTitleRotation(cover.titleRotation),
+    titleColor:
+      typeof cover.titleColor === 'string' && cover.titleColor.trim()
+        ? cover.titleColor.trim()
+        : undefined,
     stickers: Array.isArray(cover.stickers) ? cover.stickers : [],
     photos: normalizeCoverPhotos(cover.photos),
     texts: normalizeCoverTexts(cover.texts),
