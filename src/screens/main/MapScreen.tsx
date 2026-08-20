@@ -52,7 +52,7 @@ const MARKER_TRACK_MS = 500;
 const FOCUS_LAT_OFFSET = 0.006;
 const SHEET_MAX_HEIGHT = Math.round(Dimensions.get('window').height * 0.48);
 
-export function MapScreen(_props: Props) {
+export function MapScreen({ route }: Props) {
   const insets = useSafeAreaInsets();
   const mapRef = useRef<MapView | null>(null);
   const [query, setQuery] = useState('');
@@ -65,10 +65,11 @@ export function MapScreen(_props: Props) {
   /** TODO: 장소 contentId 기준 관련 다이어리 API로 교체 */
   const [relatedDiaries, setRelatedDiaries] = useState<PlaceRelatedDiary[]>([]);
   const [relatedLoading, setRelatedLoading] = useState(false);
+  const [externalPlace, setExternalPlace] = useState<MapPlace | null>(null);
 
   const places = useMemo(() => {
     const keyword = query.trim().toLowerCase();
-    return MAP_PLACES.filter((place) => {
+    const base = MAP_PLACES.filter((place) => {
       const matchesCategory = category === null || place.category === category;
       const matchesKeyword =
         !keyword ||
@@ -76,8 +77,64 @@ export function MapScreen(_props: Props) {
         place.address.toLowerCase().includes(keyword);
       return matchesCategory && matchesKeyword;
     });
-  }, [category, query]);
+    if (
+      externalPlace &&
+      !base.some((place) => place.id === externalPlace.id) &&
+      (category === null || externalPlace.category === category)
+    ) {
+      return [externalPlace, ...base];
+    }
+    return base;
+  }, [category, query, externalPlace]);
 
+  useFocusEffect(
+    useCallback(() => {
+      const focus = route.params?.focusPlace;
+      if (!focus?.contentId) {
+        return;
+      }
+      const lat = focus.latitude;
+      const lng = focus.longitude;
+      if (typeof lat === 'number' && typeof lng === 'number') {
+        const mapped: MapPlace = {
+          id: focus.contentId,
+          name: focus.title?.trim() || '찜한 장소',
+          category: '관광지',
+          address: focus.address?.trim() || '',
+          distanceKm: 0,
+          photoCount: 0,
+          latitude: lat,
+          longitude: lng,
+        };
+        setExternalPlace(mapped);
+        setSelectedId(mapped.id);
+        mapRef.current?.animateToRegion(
+          {
+            latitude: lat - FOCUS_LAT_OFFSET,
+            longitude: lng,
+            latitudeDelta: 0.02,
+            longitudeDelta: 0.02,
+          },
+          400,
+        );
+      } else {
+        const local = MAP_PLACES.find((place) => place.id === focus.contentId);
+        if (local) {
+          setExternalPlace(null);
+          setSelectedId(local.id);
+          mapRef.current?.animateToRegion(
+            {
+              latitude: local.latitude - FOCUS_LAT_OFFSET,
+              longitude: local.longitude,
+              latitudeDelta: 0.02,
+              longitudeDelta: 0.02,
+            },
+            400,
+          );
+        }
+      }
+    }, [route.params?.focusPlace]),
+  );
   const selectedPlace = places.find((place) => place.id === selectedId) ?? null;
   const isSaved = selectedPlace ? savedIds.includes(selectedPlace.id) : false;
 

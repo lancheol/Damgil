@@ -16,7 +16,17 @@ export type MainTabParamList = {
   /** 탭에서 제외됨 — AIScreen 타입용으로만 유지 */
   AI: undefined;
   Search: undefined;
-  Map: undefined;
+  Map:
+    | {
+        focusPlace?: {
+          contentId: string;
+          title?: string | null;
+          address?: string | null;
+          latitude?: number | null;
+          longitude?: number | null;
+        };
+      }
+    | undefined;
   MyPage: undefined;
 };
 
