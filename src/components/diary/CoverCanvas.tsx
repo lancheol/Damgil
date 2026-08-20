@@ -285,6 +285,8 @@ export function CoverCanvas({
         onSelect={() => onSelectTitle?.()}
         onEditRequest={() => onEditTitle?.()}
         onMove={(nextX, nextY) => onMoveTitle?.(nextX, nextY)}
+        onScale={(nextScale) => onScaleTitle?.(nextScale)}
+        onRotate={(nextRotation) => onRotateTitle?.(nextRotation)}
         onDragChange={onTitleDragChange}
         onDragPointer={onTitleDragPointer}
         onDragEnd={(pageX, pageY) => onTitleDragEnd?.(pageX, pageY)}
