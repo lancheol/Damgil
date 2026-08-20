@@ -1,5 +1,5 @@
 import type { FeedItemDto, PublicTripDetailDto } from '../api/types';
-import type { Diary, DiaryCover } from '../types/diary';
+import type { Diary, DiaryCover, DiaryPhoto } from '../types/diary';
 import { applyTimelineToDiary } from './tripItemMapper';
 import { toDiaryStatus } from './tripStatus';
 
@@ -12,10 +12,14 @@ export type FeedDiaryCard = {
   commentCount: number;
   liked: boolean;
   coverThumbUrl: string | null;
+  /** 공개 상세에서 복원한 꾸미기 표지 — 있으면 CoverCanvas로 렌더 */
+  cover: DiaryCover | null;
+  /** 표지 사진 레이어용 */
+  photos: DiaryPhoto[];
   publishedAt: string | null;
 };
 
-function coverFromStickerLayout(
+export function coverFromStickerLayout(
   title: string,
   font: string | null | undefined,
   layout: Record<string, unknown> | null | undefined,
@@ -52,6 +56,7 @@ function coverFromStickerLayout(
 export function feedItemToCard(
   item: FeedItemDto,
   coverThumbUrl: string | null = null,
+  extras: { cover?: DiaryCover | null; photos?: DiaryPhoto[] } = {},
 ): FeedDiaryCard {
   return {
     id: item.id,
@@ -62,7 +67,42 @@ export function feedItemToCard(
     commentCount: item.commentCount ?? 0,
     liked: Boolean(item.liked),
     coverThumbUrl,
+    cover: extras.cover ?? null,
+    photos: extras.photos ?? [],
     publishedAt: item.publishedAt,
+  };
+}
+
+/** 피드 카드용 Diary 스텁 — CoverThumb가 꾸미기 표지를 그릴 수 있게 */
+export function feedCardToDiaryStub(card: FeedDiaryCard): Diary {
+  const title = card.title;
+  return {
+    id: card.id,
+    name: title,
+    place: '',
+    createdAt: card.publishedAt ?? new Date().toISOString(),
+    endedAt: card.publishedAt,
+    status: 'completed',
+    editStatus: 'COMPLETED',
+    likeCount: card.likeCount,
+    commentCount: card.commentCount,
+    liked: card.liked,
+    coverThumbUrl: card.coverThumbUrl,
+    photos: card.photos,
+    cover:
+      card.cover ??
+      ({
+        coverPhotoId: null,
+        title,
+        fontId: 'sans',
+        stickers: [],
+        photos: [],
+        texts: [],
+        backgroundColor: '#1A1A1A',
+        updatedAt: new Date().toISOString(),
+      } satisfies DiaryCover),
+    coverDraft: null,
+    visibility: 'public',
   };
 }
 

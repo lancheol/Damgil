@@ -18,7 +18,14 @@ export function CoverThumb({ diary, style, fill = true }: CoverThumbProps) {
     Boolean(cover.photos?.length) ||
     Boolean(cover.stickers?.length) ||
     Boolean(cover.texts?.length) ||
-    photos.some((photo) => Boolean(photo.uri));
+    photos.some((photo) => Boolean(photo.uri)) ||
+    Boolean(cover.titleColor?.trim()) ||
+    (typeof cover.titleScale === 'number' && cover.titleScale !== 1) ||
+    (typeof cover.titleRotation === 'number' && cover.titleRotation !== 0) ||
+    (typeof cover.titleX === 'number' && Math.abs(cover.titleX - 0.5) > 0.001) ||
+    (typeof cover.titleY === 'number' && Math.abs(cover.titleY - 0.5) > 0.001) ||
+    (Boolean(cover.backgroundColor?.trim()) &&
+      cover.backgroundColor?.trim().toUpperCase() !== '#1A1A1A');
   const remoteThumb = diary?.coverThumbUrl?.trim() || null;
 
   const photoById = useMemo(() => {

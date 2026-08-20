@@ -18,10 +18,16 @@ import * as ImagePicker from 'expo-image-picker';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { BackButton } from '../../components/common/BackButton';
+import { DiaryCommentsSheet } from '../../components/diary/DiaryCommentsSheet';
 import { DiaryPageCanvas } from '../../components/diary/DiaryPageCanvas';
+import { DiarySocialDock } from '../../components/diary/DiarySocialDock';
 import { PhotoCropModal } from '../../components/diary/PhotoCropModal';
 import { HomeBookShell } from '../../components/home/HomeBookShell';
 import { useDiaries } from '../../context/DiaryContext';
+import { listSavedPlaces, savePlace, unsavePlace } from '../../api/saves';
+import { toggleTripLike } from '../../api/social';
+import { loadTokens } from '../../api/tokenStorage';
+import { ApiError } from '../../api/types';
 import { RootStackParamList } from '../../navigation/types';
 import {
   DecorFontId,
@@ -71,12 +77,71 @@ export function DiaryEditScreen({ navigation, route }: Props) {
   const readOnly =
     route.params.mode === 'view' || isDiaryPublished(diary);
 
+  const [liked, setLiked] = useState(Boolean(route.params.liked));
+  const [likeCount, setLikeCount] = useState(
+    route.params.likeCount ?? diary?.likeCount ?? 0,
+  );
+  const [commentCount, setCommentCount] = useState(
+    route.params.commentCount ?? diary?.commentCount ?? 0,
+  );
+  const [likeBusy, setLikeBusy] = useState(false);
+  const [commentsOpen, setCommentsOpen] = useState(false);
+  const [savedPlaceIds, setSavedPlaceIds] = useState<string[]>([]);
+  const [placeSaveBusy, setPlaceSaveBusy] = useState(false);
+
   useEffect(() => {
     void (async () => {
       await syncDiaryTimeline(diaryId);
       await syncDiaryEditor(diaryId);
     })();
   }, [diaryId, syncDiaryTimeline, syncDiaryEditor]);
+
+  useEffect(() => {
+    if (!readOnly) {
+      return;
+    }
+    let cancelled = false;
+    void (async () => {
+      const tokens = await loadTokens();
+      if (!tokens?.access || cancelled) return;
+      try {
+        const saves = await listSavedPlaces(tokens.access);
+        if (!cancelled) {
+          setSavedPlaceIds(saves.map((item) => item.contentId));
+        }
+      } catch {
+        // 찜 상태 동기화 실패는 조용히 무시
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [readOnly, diaryId]);
+
+  useEffect(() => {
+    if (route.params.likeCount != null) {
+      setLikeCount(route.params.likeCount);
+    } else if (diary?.likeCount != null) {
+      setLikeCount(diary.likeCount);
+    }
+    if (route.params.commentCount != null) {
+      setCommentCount(route.params.commentCount);
+    } else if (diary?.commentCount != null) {
+      setCommentCount(diary.commentCount);
+    }
+    if (route.params.liked != null) {
+      setLiked(Boolean(route.params.liked));
+    } else if (diary?.liked != null) {
+      setLiked(Boolean(diary.liked));
+    }
+  }, [
+    diary?.commentCount,
+    diary?.likeCount,
+    diary?.liked,
+    route.params.commentCount,
+    route.params.likeCount,
+    route.params.liked,
+  ]);
 
   useEffect(() => {
     if (!diary || !diary.endedAt) {
@@ -127,11 +192,16 @@ export function DiaryEditScreen({ navigation, route }: Props) {
       return [] as DiaryPlaceSelection[];
     }
     const dayPhotoIds = new Set(activeDay.records.map((item) => item.id));
-    return (diary.placeSelections ?? []).filter(
-      (place) =>
-        dayPhotoIds.has(place.representativePhotoId) ||
-        place.photoIds.some((id) => dayPhotoIds.has(id)),
-    );
+    const selections = diary.placeSelections ?? [];
+    if (selections.length > 0) {
+      return selections.filter(
+        (place) =>
+          dayPhotoIds.has(place.representativePhotoId) ||
+          place.photoIds.some((id) => dayPhotoIds.has(id)),
+      );
+    }
+    // 공개(게스트) 다이어리 등 placeSelections가 없을 때 일차 기록으로 장소 구성
+    return buildPlaceSelections(activeDay.records);
   }, [diary, activeDay]);
 
   const activePlace = useMemo(
@@ -652,6 +722,77 @@ export function DiaryEditScreen({ navigation, route }: Props) {
     ]);
   };
 
+  const placeContentId = activePlace?.placeContentId?.trim() || null;
+  const placeSaved = placeContentId ? savedPlaceIds.includes(placeContentId) : false;
+
+  const handleToggleLike = useCallback(async () => {
+    if (likeBusy) return;
+    const tokens = await loadTokens();
+    if (!tokens?.access) {
+      Alert.alert('좋아요', '로그인이 필요합니다.');
+      return;
+    }
+    const prevLiked = liked;
+    const prevCount = likeCount;
+    setLiked(!prevLiked);
+    setLikeCount(Math.max(0, prevCount + (prevLiked ? -1 : 1)));
+    setLikeBusy(true);
+    try {
+      const result = await toggleTripLike(tokens.access, diaryId);
+      setLiked(result.liked);
+      setLikeCount(result.likeCount);
+    } catch (error) {
+      setLiked(prevLiked);
+      setLikeCount(prevCount);
+      const message =
+        error instanceof ApiError ? error.message : '좋아요를 반영하지 못했어요.';
+      Alert.alert('좋아요', message);
+    } finally {
+      setLikeBusy(false);
+    }
+  }, [diaryId, likeBusy, likeCount, liked]);
+
+  const handleTogglePlaceSave = useCallback(async () => {
+    if (!placeContentId || placeSaveBusy) return;
+    const tokens = await loadTokens();
+    if (!tokens?.access) {
+      Alert.alert('찜하기', '로그인이 필요합니다.');
+      return;
+    }
+    const wasSaved = savedPlaceIds.includes(placeContentId);
+    setSavedPlaceIds((prev) =>
+      wasSaved ? prev.filter((id) => id !== placeContentId) : [...prev, placeContentId],
+    );
+    setPlaceSaveBusy(true);
+    try {
+      if (wasSaved) {
+        await unsavePlace(tokens.access, placeContentId);
+      } else {
+        const result = await savePlace(tokens.access, { contentId: placeContentId });
+        if (!result.saved) {
+          setSavedPlaceIds((prev) => prev.filter((id) => id !== placeContentId));
+        }
+      }
+    } catch (error) {
+      setSavedPlaceIds((prev) =>
+        wasSaved
+          ? prev.includes(placeContentId)
+            ? prev
+            : [...prev, placeContentId]
+          : prev.filter((id) => id !== placeContentId),
+      );
+      const message =
+        error instanceof ApiError
+          ? error.message
+          : wasSaved
+            ? '찜을 해제하지 못했어요.'
+            : '찜하지 못했어요.';
+      Alert.alert(wasSaved ? '찜 해제 실패' : '찜하기 실패', message);
+    } finally {
+      setPlaceSaveBusy(false);
+    }
+  }, [placeContentId, placeSaveBusy, savedPlaceIds]);
+
   if (!diary) {
     return (
       <SafeAreaView style={styles.safe} edges={['top', 'bottom']}>
@@ -693,7 +834,7 @@ export function DiaryEditScreen({ navigation, route }: Props) {
       </View>
 
       <View style={styles.body}>
-        <View style={styles.bookStack}>
+        <View style={[styles.bookStack, readOnly && styles.bookStackWithSocial]}>
           <ScrollView
             horizontal
             showsHorizontalScrollIndicator={false}
@@ -1110,7 +1251,33 @@ export function DiaryEditScreen({ navigation, route }: Props) {
       </Modal>
       </>
       ) : (
-        <View style={{ height: Math.max(insets.bottom, 12) }} />
+        <>
+          <DiarySocialDock
+            liked={liked}
+            likeCount={likeCount}
+            commentCount={commentCount}
+            likeBusy={likeBusy}
+            placeName={activePlace?.placeName}
+            placeSaved={placeSaved}
+            placeSaveEnabled={Boolean(placeContentId)}
+            placeSaveBusy={placeSaveBusy}
+            onToggleLike={() => {
+              void handleToggleLike();
+            }}
+            onOpenComments={() => setCommentsOpen(true)}
+            onTogglePlaceSave={() => {
+              void handleTogglePlaceSave();
+            }}
+            bottomInset={insets.bottom}
+          />
+          <DiaryCommentsSheet
+            visible={commentsOpen}
+            tripId={diaryId}
+            onClose={() => setCommentsOpen(false)}
+            onCommentAdded={() => setCommentCount((prev) => prev + 1)}
+            onCommentDeleted={() => setCommentCount((prev) => Math.max(0, prev - 1))}
+          />
+        </>
       )}
     </SafeAreaView>
   );
@@ -1165,6 +1332,9 @@ const styles = StyleSheet.create({
     flex: 1,
     paddingTop: 32,
     overflow: 'visible',
+  },
+  bookStackWithSocial: {
+    marginBottom: spacing.lg,
   },
   indexScroll: {
     position: 'absolute',

@@ -22,6 +22,7 @@ import { useAuth } from '../../context/AuthContext';
 import { useDiaries } from '../../context/DiaryContext';
 import { getPublicFeed } from '../../api/feed';
 import { getMediaDisplayUri } from '../../api/media';
+import { getPublicTrip } from '../../api/publicTrips';
 import { loadTokens } from '../../api/tokenStorage';
 import { MainTabParamList, RootStackParamList } from '../../navigation/types';
 import { Diary } from '../../types/diary';
@@ -30,7 +31,12 @@ import { getCoverBackgroundColor, getEffectiveCover } from '../../utils/diaryCov
 import { colors } from '../../theme';
 import type { Festival } from '../../types/festival';
 import { loadFestivals } from '../../utils/festivals';
-import { feedItemToCard, type FeedDiaryCard } from '../../utils/feedMapper';
+import {
+  coverFromStickerLayout,
+  feedCardToDiaryStub,
+  feedItemToCard,
+  type FeedDiaryCard,
+} from '../../utils/feedMapper';
 import { isDiaryPublished } from '../../utils/tripStatus';
 
 type Props = CompositeScreenProps<
@@ -117,14 +123,64 @@ export function SearchScreen({ navigation }: Props) {
       const cards = await Promise.all(
         feed.items.map(async (item) => {
           let coverThumbUrl: string | null = null;
-          if (item.coverMediaId) {
+          let cover = coverFromStickerLayout(
+            item.title?.trim() || '여행 다이어리',
+            null,
+            null,
+          );
+          let photos: Diary['photos'] = [];
+
+          try {
+            const detail = await getPublicTrip(item.id);
+            cover = coverFromStickerLayout(
+              detail.title?.trim() || item.title?.trim() || '여행 다이어리',
+              detail.coverTitleFont,
+              detail.coverStickerLayout,
+            );
+            coverThumbUrl = detail.coverUrl?.trim() || null;
+
+            const mediaEntries = await Promise.all(
+              (detail.items ?? []).map(async (tripItem) => {
+                if (!tripItem.mediaId || !tokens.access) {
+                  return [tripItem.id, null] as const;
+                }
+                try {
+                  return [
+                    tripItem.id,
+                    await getMediaDisplayUri(tokens.access, tripItem.mediaId),
+                  ] as const;
+                } catch {
+                  return [tripItem.id, null] as const;
+                }
+              }),
+            );
+            const uriByItemId = Object.fromEntries(mediaEntries);
+            photos = (detail.items ?? []).map((tripItem) => ({
+              id: tripItem.id,
+              uri: uriByItemId[tripItem.id] ?? '',
+              mediaType: tripItem.kind === 'video' ? 'video' : 'photo',
+              mediaId: tripItem.mediaId ?? null,
+              placeName: null,
+              note: tripItem.note?.trim() || '',
+              latitude: tripItem.lat ?? 0,
+              longitude: tripItem.lng ?? 0,
+              placeContentId:
+                tripItem.confirmedPlaceContentId || tripItem.placeContentId || null,
+              createdAt: tripItem.capturedAt,
+            }));
+          } catch {
+            // 공개 상세 실패 시 피드 썸네일만으로 폴백
+          }
+
+          if (!coverThumbUrl && item.coverMediaId) {
             try {
               coverThumbUrl = await getMediaDisplayUri(tokens.access, item.coverMediaId);
             } catch {
               coverThumbUrl = null;
             }
           }
-          return feedItemToCard(item, coverThumbUrl);
+
+          return feedItemToCard(item, coverThumbUrl, { cover, photos });
         }),
       );
       if (feedRequestRef.current === requestId) setFeedCards(cards);
@@ -172,6 +228,9 @@ export function SearchScreen({ navigation }: Props) {
       navigation.navigate('DiaryEdit', {
         diaryId: result.diary.id,
         mode: isMine && !isDiaryPublished(result.diary) ? 'edit' : 'view',
+        liked: card.liked,
+        likeCount: card.likeCount,
+        commentCount: card.commentCount,
       });
     } finally {
       setOpeningId(null);
@@ -466,31 +525,8 @@ type FeedDiaryCellProps = {
 };
 
 function FeedDiaryCell({ card, busy, onPress }: FeedDiaryCellProps) {
-  const stubDiary: Diary = {
-    id: card.id,
-    name: card.title,
-    place: '',
-    createdAt: card.publishedAt ?? new Date().toISOString(),
-    endedAt: card.publishedAt,
-    status: 'completed',
-    editStatus: 'COMPLETED',
-    likeCount: card.likeCount,
-    commentCount: card.commentCount,
-    coverThumbUrl: card.coverThumbUrl,
-    photos: [],
-    cover: {
-      coverPhotoId: null,
-      title: card.title,
-      fontId: 'sans',
-      stickers: [],
-      photos: [],
-      texts: [],
-      backgroundColor: '#1A1A1A',
-      updatedAt: new Date().toISOString(),
-    },
-    coverDraft: null,
-    visibility: 'public',
-  };
+  const stubDiary = feedCardToDiaryStub(card);
+  const cover = getEffectiveCover(stubDiary);
 
   return (
     <Pressable
@@ -500,7 +536,7 @@ function FeedDiaryCell({ card, busy, onPress }: FeedDiaryCellProps) {
       onPress={onPress}
       style={({ pressed }) => [
         styles.thumb,
-        { backgroundColor: getCoverBackgroundColor(stubDiary.cover) },
+        { backgroundColor: getCoverBackgroundColor(cover) },
         (pressed || busy) && styles.pressed,
       ]}
     >

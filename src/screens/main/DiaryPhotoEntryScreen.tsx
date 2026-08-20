@@ -46,10 +46,12 @@ export function DiaryPhotoEntryScreen({ navigation, route }: Props) {
   const [candidate, setCandidate] = useState<MapLocation | null>(null);
   const [confirmedLocation, setConfirmedLocation] = useState<MapLocation | null>(null);
   const [rejectHint, setRejectHint] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
   const searchSeqRef = useRef(0);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const submittingRef = useRef(false);
 
-  const canSubmit = confirmedLocation !== null;
+  const canSubmit = confirmedLocation !== null && !submitting;
   const showInlineConfirm = candidate !== null && confirmedLocation === null;
 
   useEffect(() => {
@@ -195,26 +197,36 @@ export function DiaryPhotoEntryScreen({ navigation, route }: Props) {
   };
 
   const handleSubmit = () => {
-    if (!confirmedLocation) {
+    if (!confirmedLocation || submittingRef.current) {
       return;
     }
 
+    submittingRef.current = true;
+    setSubmitting(true);
+
     void (async () => {
-      const saved = await addPhotoToDiary({
-        diaryId,
-        uri: photoUri,
-        mediaType,
-        placeName: confirmedLocation.name,
-        latitude: confirmedLocation.latitude,
-        longitude: confirmedLocation.longitude,
-        placeContentId: confirmedLocation.contentId,
-      });
+      try {
+        const saved = await addPhotoToDiary({
+          diaryId,
+          uri: photoUri,
+          mediaType,
+          placeName: confirmedLocation.name,
+          latitude: confirmedLocation.latitude,
+          longitude: confirmedLocation.longitude,
+          placeContentId: confirmedLocation.contentId,
+        });
 
-      if (!saved) {
-        return;
+        if (!saved) {
+          submittingRef.current = false;
+          setSubmitting(false);
+          return;
+        }
+
+        navigation.popToTop();
+      } catch {
+        submittingRef.current = false;
+        setSubmitting(false);
       }
-
-      navigation.popToTop();
     })();
   };
 
@@ -378,6 +390,7 @@ export function DiaryPhotoEntryScreen({ navigation, route }: Props) {
           <Pressable
             accessibilityRole="button"
             accessibilityState={{ disabled: !canSubmit }}
+            disabled={!canSubmit}
             onPress={handleSubmit}
             style={({ pressed }) => [
               styles.submitButton,
@@ -389,6 +402,13 @@ export function DiaryPhotoEntryScreen({ navigation, route }: Props) {
           </Pressable>
         </View>
       </KeyboardAvoidingView>
+
+      {submitting ? (
+        <View style={styles.blockingOverlay} pointerEvents="auto">
+          <ActivityIndicator size="large" color={colors.white} />
+          <Text style={styles.blockingText}>저장 중…</Text>
+        </View>
+      ) : null}
     </SafeAreaView>
   );
 }
@@ -545,6 +565,18 @@ const styles = StyleSheet.create({
   },
   submitButtonText: {
     fontSize: 16,
+    color: colors.white,
+  },
+  blockingOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: 'rgba(0,0,0,0.45)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: spacing.sm,
+    zIndex: 20,
+  },
+  blockingText: {
+    ...typography.label,
     color: colors.white,
   },
   pressed: {

@@ -129,6 +129,7 @@ export type Diary = {
   updatedAt?: string | null;
   likeCount?: number;
   commentCount?: number;
+  liked?: boolean;
   /** 목록용 표지 썸네일(presigned). 로컬 cover/photos가 없을 때 사용 */
   coverThumbUrl?: string | null;
   photos: DiaryPhoto[];

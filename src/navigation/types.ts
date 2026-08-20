@@ -45,7 +45,14 @@ export type RootStackParamList = {
     captureLandscape?: boolean;
   };
   DiaryPhotoGallery: { diaryId: string };
-  DiaryEdit: { diaryId: string; placeId?: string; mode?: 'edit' | 'view' };
+  DiaryEdit: {
+    diaryId: string;
+    placeId?: string;
+    mode?: 'edit' | 'view';
+    liked?: boolean;
+    likeCount?: number;
+    commentCount?: number;
+  };
   DiaryPlacePick: { diaryId: string };
   DiaryCoverEdit: { diaryId: string; fromTripEnd?: boolean };
   DiaryDailyCourseMap: { diaryId: string; dayNumber?: number };

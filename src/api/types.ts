@@ -287,6 +287,39 @@ export type FeedListQuery = {
   sort?: 'recent';
 };
 
+/** POST /trips/{id}/likes */
+export type ToggleLikeResponseDto = {
+  liked: boolean;
+  likeCount: number;
+};
+
+/** POST /trips/{id}/comments */
+export type CreateCommentRequest = {
+  body: string;
+};
+
+export type CommentDto = {
+  id: string;
+  tripId: string;
+  userId: string | null;
+  body: string;
+  createdAt: string;
+  deletedAt: string | null;
+  authorNickname: string | null;
+};
+
+export type CommentsListResponseDto = {
+  items: CommentDto[];
+  page: number;
+  limit: number;
+  hasMore: boolean;
+};
+
+export type CommentsListQuery = {
+  page?: number;
+  limit?: number;
+};
+
 /** POST /saves */
 export type SavePlaceRequest = {
   contentId: string;
