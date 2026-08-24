@@ -8,7 +8,6 @@ import {
   Alert,
   Dimensions,
   FlatList,
-  Image,
   Modal,
   Pressable,
   StyleSheet,
@@ -18,9 +17,8 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { getPublicFeed } from '../../api/feed';
-import { listSavedPlaces, unsavePlace } from '../../api/saves';
 import { loadTokens } from '../../api/tokenStorage';
-import { ApiError, FeedItemDto, SavedPlaceItemDto } from '../../api/types';
+import { ApiError, FeedItemDto } from '../../api/types';
 import { MyPageHeartIcon, MyPageSettingsIcon } from '../../components/mypage/MyPageIcons';
 import { ProfileAvatar } from '../../components/mypage/ProfileAvatar';
 import { CoverThumb } from '../../components/diary/CoverThumb';
@@ -45,7 +43,7 @@ type Props = CompositeScreenProps<
   NativeStackScreenProps<RootStackParamList>
 >;
 
-type LibrarySegment = 'mine' | 'liked' | 'saved';
+type LibrarySegment = 'mine' | 'liked';
 
 const H_PADDING = 20;
 const GRID_GAP = 12;
@@ -54,7 +52,6 @@ const CARD_WIDTH = (Dimensions.get('window').width - H_PADDING * 2 - GRID_GAP) /
 const SEGMENTS: { id: LibrarySegment; label: string }[] = [
   { id: 'mine', label: '내 다이어리' },
   { id: 'liked', label: '좋아요' },
-  { id: 'saved', label: '찜한 장소' },
 ];
 
 export function MyPageScreen({ navigation }: Props) {
@@ -70,9 +67,6 @@ export function MyPageScreen({ navigation }: Props) {
   const [visibilityBusy, setVisibilityBusy] = useState(false);
   const [likedCards, setLikedCards] = useState<FeedDiaryCard[]>([]);
   const [likedLoading, setLikedLoading] = useState(false);
-  const [savedPlaces, setSavedPlaces] = useState<SavedPlaceItemDto[]>([]);
-  const [savedLoading, setSavedLoading] = useState(false);
-  const [savedBusyId, setSavedBusyId] = useState<string | null>(null);
   const [openingLikedId, setOpeningLikedId] = useState<string | null>(null);
   const [editBusy, setEditBusy] = useState(false);
   const likedRequestRef = useRef(0);
@@ -150,31 +144,12 @@ export function MyPageScreen({ navigation }: Props) {
     }
   }, []);
 
-  const loadSaved = useCallback(async () => {
-    setSavedLoading(true);
-    try {
-      const tokens = await loadTokens();
-      if (!tokens?.access) {
-        setSavedPlaces([]);
-        return;
-      }
-      const items = await listSavedPlaces(tokens.access);
-      setSavedPlaces(items);
-    } catch {
-      setSavedPlaces([]);
-    } finally {
-      setSavedLoading(false);
-    }
-  }, []);
-
   useFocusEffect(
     useCallback(() => {
       if (segment === 'liked') {
         void loadLiked();
-      } else if (segment === 'saved') {
-        void loadSaved();
       }
-    }, [segment, loadLiked, loadSaved]),
+    }, [segment, loadLiked]),
   );
 
   const openDiary = (diary: Diary) => {
@@ -233,49 +208,6 @@ export function MyPageScreen({ navigation }: Props) {
     } finally {
       setOpeningLikedId(null);
     }
-  };
-
-  const openSavedPlace = (item: SavedPlaceItemDto) => {
-    navigation.navigate('Main', {
-      screen: 'Map',
-      params: {
-        focusPlace: {
-          contentId: item.contentId,
-          title: item.place?.title ?? null,
-          address: item.place?.addr1 ?? null,
-          latitude: item.place?.lat ?? null,
-          longitude: item.place?.lng ?? null,
-        },
-      },
-    });
-  };
-
-  const confirmUnsave = (item: SavedPlaceItemDto) => {
-    const title = item.place?.title?.trim() || '이 장소';
-    Alert.alert('찜 해제', `'${title}' 찜을 해제할까요?`, [
-      { text: '취소', style: 'cancel' },
-      {
-        text: '해제',
-        style: 'destructive',
-        onPress: () => {
-          void (async () => {
-            const tokens = await loadTokens();
-            if (!tokens?.access) return;
-            setSavedBusyId(item.contentId);
-            try {
-              await unsavePlace(tokens.access, item.contentId);
-              setSavedPlaces((prev) => prev.filter((row) => row.contentId !== item.contentId));
-            } catch (error) {
-              const message =
-                error instanceof ApiError ? error.message : '찜을 해제하지 못했어요.';
-              Alert.alert('찜 해제 실패', message);
-            } finally {
-              setSavedBusyId(null);
-            }
-          })();
-        },
-      },
-    ]);
   };
 
   const confirmDelete = (diary: Diary) => {
@@ -378,53 +310,6 @@ export function MyPageScreen({ navigation }: Props) {
     );
   };
 
-  const renderSavedPlace = ({ item }: { item: SavedPlaceItemDto }) => {
-    const title = item.place?.title?.trim() || '장소 정보 없음';
-    const address = item.place?.addr1?.trim() || '';
-    const thumb = item.place?.firstImage?.trim() || null;
-    const busy = savedBusyId === item.contentId;
-
-    return (
-      <Pressable
-        accessibilityRole="button"
-        onPress={() => openSavedPlace(item)}
-        style={({ pressed }) => [styles.savedRow, pressed && styles.pressed]}
-      >
-        <View style={styles.savedThumb}>
-          {thumb ? (
-            <Image source={{ uri: thumb }} style={styles.savedThumbImage} />
-          ) : (
-            <Ionicons name="location-outline" size={22} color={colors.inkMuted} />
-          )}
-        </View>
-        <View style={styles.savedCopy}>
-          <Text style={styles.savedTitle} numberOfLines={1}>
-            {title}
-          </Text>
-          {address ? (
-            <Text style={styles.savedAddress} numberOfLines={1}>
-              {address}
-            </Text>
-          ) : null}
-        </View>
-        <Pressable
-          accessibilityRole="button"
-          accessibilityLabel="찜 해제"
-          disabled={busy}
-          hitSlop={8}
-          onPress={() => confirmUnsave(item)}
-          style={({ pressed }) => [styles.savedHeart, pressed && styles.pressed]}
-        >
-          {busy ? (
-            <ActivityIndicator size="small" color={colors.danger} />
-          ) : (
-            <Ionicons name="heart" size={20} color={colors.danger} />
-          )}
-        </Pressable>
-      </Pressable>
-    );
-  };
-
   const listHeader = (
     <View>
       <View style={styles.profileRow}>
@@ -472,12 +357,9 @@ export function MyPageScreen({ navigation }: Props) {
   const emptyText =
     segment === 'mine'
       ? '아직 등록된 여행 다이어리가 없어요.'
-      : segment === 'liked'
-        ? '좋아요한 다이어리가 없어요.'
-        : '찜한 장소가 없어요.';
+      : '좋아요한 다이어리가 없어요.';
 
-  const showLoading =
-    (segment === 'liked' && likedLoading) || (segment === 'saved' && savedLoading);
+  const showLoading = segment === 'liked' && likedLoading;
 
   return (
     <SafeAreaView style={styles.safe} edges={['top']}>
@@ -530,27 +412,6 @@ export function MyPageScreen({ navigation }: Props) {
             </View>
           }
           renderItem={renderLikedCard}
-        />
-      ) : null}
-
-      {segment === 'saved' ? (
-        <FlatList
-          data={savedPlaces}
-          keyExtractor={(item) => item.contentId}
-          contentContainerStyle={styles.listContent}
-          showsVerticalScrollIndicator={false}
-          ListHeaderComponent={listHeader}
-          ListEmptyComponent={
-            <View style={styles.empty}>
-              {showLoading ? (
-                <ActivityIndicator color={colors.ink} />
-              ) : (
-                <Text style={styles.emptyText}>{emptyText}</Text>
-              )}
-            </View>
-          }
-          renderItem={renderSavedPlace}
-          ItemSeparatorComponent={() => <View style={styles.savedSeparator} />}
         />
       ) : null}
 
@@ -801,49 +662,6 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(0,0,0,0.4)',
     alignItems: 'center',
     justifyContent: 'center',
-  },
-  savedRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: spacing.md,
-    paddingVertical: spacing.md,
-  },
-  savedThumb: {
-    width: 56,
-    height: 56,
-    borderRadius: radii.md,
-    backgroundColor: '#EEF0F3',
-    alignItems: 'center',
-    justifyContent: 'center',
-    overflow: 'hidden',
-  },
-  savedThumbImage: {
-    width: '100%',
-    height: '100%',
-  },
-  savedCopy: {
-    flex: 1,
-    gap: 4,
-    minWidth: 0,
-  },
-  savedTitle: {
-    fontSize: 15,
-    fontWeight: '600',
-    color: '#1E2939',
-  },
-  savedAddress: {
-    fontSize: 12,
-    color: '#6A7282',
-  },
-  savedHeart: {
-    width: 40,
-    height: 40,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  savedSeparator: {
-    height: StyleSheet.hairlineWidth,
-    backgroundColor: '#E5E7EB',
   },
   menuBackdrop: {
     flex: 1,

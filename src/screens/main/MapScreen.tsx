@@ -5,6 +5,7 @@ import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import * as Location from 'expo-location';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
+  ActivityIndicator,
   Alert,
   Dimensions,
   Image,
@@ -28,9 +29,18 @@ import {
 } from '../../constants/mapPlaces';
 import { listSavedPlaces, savePlace, unsavePlace } from '../../api/saves';
 import { loadTokens } from '../../api/tokenStorage';
-import { ApiError } from '../../api/types';
+import { ApiError, SavedPlaceItemDto } from '../../api/types';
+import { mapPlaceFromSaved } from '../../utils/savedMapPlaces';
+import {
+  MapLocation,
+  mapPlaceFromSearch,
+  searchTravelPlaces,
+  tourTypeFromMapCategory,
+} from '../../utils/placeSearch';
 import { MainTabParamList, RootStackParamList } from '../../navigation/types';
 import { colors, radii, spacing } from '../../theme';
+
+const SEARCH_DEBOUNCE_MS = 280;
 
 type Props = CompositeScreenProps<
   BottomTabScreenProps<MainTabParamList, 'Map'>,
@@ -52,13 +62,41 @@ const MARKER_TRACK_MS = 500;
 const FOCUS_LAT_OFFSET = 0.006;
 const SHEET_MAX_HEIGHT = Math.round(Dimensions.get('window').height * 0.48);
 
+/** TODO: 장소 contentId 기준 관련 공개 다이어리 API로 교체 */
+const MOCK_RELATED_DIARIES: PlaceRelatedDiary[] = [
+  {
+    id: 'mock-diary-01',
+    authorNickname: 'travel_mina',
+    title: '주말 산책 기록',
+    dateLabel: '2026.03.12',
+    saveCount: 24,
+    coverThumbUrl: 'https://picsum.photos/seed/damgil-map-1/240/320',
+  },
+  {
+    id: 'mock-diary-02',
+    authorNickname: 'slow.trip',
+    title: '비 오는 날의 카페 투어',
+    dateLabel: '2026.02.28',
+    saveCount: 11,
+    coverThumbUrl: 'https://picsum.photos/seed/damgil-map-2/240/320',
+  },
+  {
+    id: 'mock-diary-03',
+    authorNickname: 'notebook.kim',
+    title: '혼자 떠난 반나절 코스',
+    dateLabel: '2026.01.19',
+    saveCount: 7,
+    coverThumbUrl: 'https://picsum.photos/seed/damgil-map-3/240/320',
+  },
+];
+
 export function MapScreen({ route }: Props) {
   const insets = useSafeAreaInsets();
   const mapRef = useRef<MapView | null>(null);
   const [query, setQuery] = useState('');
   const [category, setCategory] = useState<MapPlaceCategory | null>(null);
   const [selectedId, setSelectedId] = useState<string | null>(null);
-  const [savedIds, setSavedIds] = useState<string[]>([]);
+  const [savedPlaces, setSavedPlaces] = useState<SavedPlaceItemDto[]>([]);
   const [saveBusyId, setSaveBusyId] = useState<string | null>(null);
   const [trackMarkers, setTrackMarkers] = useState(true);
   const [showsUserLocation, setShowsUserLocation] = useState(false);
@@ -66,26 +104,101 @@ export function MapScreen({ route }: Props) {
   const [relatedDiaries, setRelatedDiaries] = useState<PlaceRelatedDiary[]>([]);
   const [relatedLoading, setRelatedLoading] = useState(false);
   const [externalPlace, setExternalPlace] = useState<MapPlace | null>(null);
+  const [suggestions, setSuggestions] = useState<MapLocation[]>([]);
+  const [dropdownOpen, setDropdownOpen] = useState(false);
+  const [searching, setSearching] = useState(false);
+  const searchSeqRef = useRef(0);
+  const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
+  const savedPins = useMemo(
+    () =>
+      savedPlaces
+        .map(mapPlaceFromSaved)
+        .filter((place): place is MapPlace => place != null),
+    [savedPlaces],
+  );
+
+  /** 지도 핀: 찜한 장소 + 검색으로 고른 장소 */
   const places = useMemo(() => {
-    const keyword = query.trim().toLowerCase();
-    const base = MAP_PLACES.filter((place) => {
-      const matchesCategory = category === null || place.category === category;
-      const matchesKeyword =
-        !keyword ||
-        place.name.toLowerCase().includes(keyword) ||
-        place.address.toLowerCase().includes(keyword);
-      return matchesCategory && matchesKeyword;
-    });
+    const byId = new Map<string, MapPlace>();
+    for (const place of savedPins) {
+      if (category === null || place.category === category) {
+        byId.set(place.id, place);
+      }
+    }
     if (
       externalPlace &&
-      !base.some((place) => place.id === externalPlace.id) &&
+      !byId.has(externalPlace.id) &&
       (category === null || externalPlace.category === category)
     ) {
-      return [externalPlace, ...base];
+      byId.set(externalPlace.id, externalPlace);
     }
-    return base;
-  }, [category, query, externalPlace]);
+    return [...byId.values()];
+  }, [category, savedPins, externalPlace]);
+
+  useEffect(() => {
+    return () => {
+      if (debounceRef.current) {
+        clearTimeout(debounceRef.current);
+      }
+    };
+  }, []);
+
+  const runSearch = useCallback(
+    async (text: string, categoryFilter: MapPlaceCategory | null) => {
+      const trimmed = text.trim();
+      if (!trimmed) {
+        setSuggestions([]);
+        setSearching(false);
+        setDropdownOpen(false);
+        return;
+      }
+
+      const seq = searchSeqRef.current + 1;
+      searchSeqRef.current = seq;
+      setSearching(true);
+
+      try {
+        const results = await searchTravelPlaces(trimmed, {
+          type: tourTypeFromMapCategory(categoryFilter),
+          rows: 10,
+        });
+        if (searchSeqRef.current !== seq) {
+          return;
+        }
+        setSuggestions(results);
+        setDropdownOpen(results.length > 0);
+      } finally {
+        if (searchSeqRef.current === seq) {
+          setSearching(false);
+        }
+      }
+    },
+    [],
+  );
+
+  const scheduleSearch = useCallback(
+    (text: string, categoryFilter: MapPlaceCategory | null) => {
+      if (debounceRef.current) {
+        clearTimeout(debounceRef.current);
+      }
+      debounceRef.current = setTimeout(() => {
+        void runSearch(text, categoryFilter);
+      }, SEARCH_DEBOUNCE_MS);
+    },
+    [runSearch],
+  );
+
+  const handleQueryChange = (text: string) => {
+    setQuery(text);
+    if (!text.trim()) {
+      setSuggestions([]);
+      setDropdownOpen(false);
+      setSearching(false);
+      return;
+    }
+    scheduleSearch(text, category);
+  };
 
   useFocusEffect(
     useCallback(() => {
@@ -136,27 +249,52 @@ export function MapScreen({ route }: Props) {
     }, [route.params?.focusPlace]),
   );
   const selectedPlace = places.find((place) => place.id === selectedId) ?? null;
+  const savedIds = useMemo(
+    () => savedPlaces.map((item) => item.contentId),
+    [savedPlaces],
+  );
   const isSaved = selectedPlace ? savedIds.includes(selectedPlace.id) : false;
 
-  const refreshSavedIds = useCallback(async () => {
+  const refreshSavedPlaces = useCallback(async () => {
     try {
       const tokens = await loadTokens();
       if (!tokens?.access) {
-        setSavedIds([]);
+        setSavedPlaces([]);
         return;
       }
       const items = await listSavedPlaces(tokens.access);
-      setSavedIds(items.map((item) => item.contentId));
+      setSavedPlaces(items);
     } catch {
-      // 목록 실패 시 기존 UI 유지 — 토글 시 서버가 최종 상태
+      // 목록 실패 시 기존 핀 유지 — 토글 시 서버가 최종 상태
     }
   }, []);
 
   useFocusEffect(
     useCallback(() => {
-      void refreshSavedIds();
-    }, [refreshSavedIds]),
+      void refreshSavedPlaces();
+    }, [refreshSavedPlaces]),
   );
+
+  const didFitSavedRef = useRef(false);
+  useEffect(() => {
+    if (didFitSavedRef.current || route.params?.focusPlace) {
+      return;
+    }
+    if (savedPins.length === 0) {
+      return;
+    }
+    didFitSavedRef.current = true;
+    mapRef.current?.fitToCoordinates(
+      savedPins.map((place) => ({
+        latitude: place.latitude,
+        longitude: place.longitude,
+      })),
+      {
+        edgePadding: { top: 140, right: 48, bottom: 180, left: 48 },
+        animated: true,
+      },
+    );
+  }, [savedPins, route.params?.focusPlace]);
 
   useEffect(() => {
     setTrackMarkers(true);
@@ -172,7 +310,7 @@ export function MapScreen({ route }: Props) {
     }
     // TODO: 장소 contentId 기준 관련 다이어리 API 연결
     setRelatedLoading(false);
-    setRelatedDiaries([]);
+    setRelatedDiaries(MOCK_RELATED_DIARIES);
   }, [selectedId]);
 
   const moveTo = (region: Region) => {
@@ -181,6 +319,8 @@ export function MapScreen({ route }: Props) {
 
   const focusPlace = (place: MapPlace) => {
     setSelectedId(place.id);
+    setDropdownOpen(false);
+    Keyboard.dismiss();
     moveTo({
       latitude: place.latitude - FOCUS_LAT_OFFSET,
       longitude: place.longitude,
@@ -189,12 +329,57 @@ export function MapScreen({ route }: Props) {
     });
   };
 
-  const handleSubmitSearch = () => {
-    const first = places[0];
-    if (!first) {
+  const selectSearchResult = (location: MapLocation) => {
+    if (debounceRef.current) {
+      clearTimeout(debounceRef.current);
+    }
+    const mapped = mapPlaceFromSearch(location);
+    if (!mapped) {
       return;
     }
-    focusPlace(first);
+    setQuery(mapped.name);
+    setSuggestions([]);
+    setDropdownOpen(false);
+    setExternalPlace(mapped);
+    setSelectedId(mapped.id);
+    Keyboard.dismiss();
+    moveTo({
+      latitude: mapped.latitude - FOCUS_LAT_OFFSET,
+      longitude: mapped.longitude,
+      latitudeDelta: 0.02,
+      longitudeDelta: 0.02,
+    });
+  };
+
+  const handleSubmitSearch = () => {
+    if (suggestions.length > 0) {
+      selectSearchResult(suggestions[0]);
+      return;
+    }
+    const trimmed = query.trim();
+    if (!trimmed) {
+      return;
+    }
+    void (async () => {
+      const results = await searchTravelPlaces(trimmed, {
+        type: tourTypeFromMapCategory(category),
+        rows: 10,
+      });
+      if (results.length > 0) {
+        selectSearchResult(results[0]);
+        return;
+      }
+      Alert.alert('검색 결과 없음', '해당 키워드로 찾은 장소가 없어요.');
+    })();
+  };
+
+  const handleCategoryChange = (next: MapPlaceCategory | null) => {
+    Keyboard.dismiss();
+    setCategory(next);
+    setDropdownOpen(false);
+    if (query.trim()) {
+      scheduleSearch(query, next);
+    }
   };
 
   const handleMoveToUser = async () => {
@@ -231,13 +416,38 @@ export function MapScreen({ route }: Props) {
 
       if (wasSaved) {
         await unsavePlace(tokens.access, contentId);
-        setSavedIds((prev) => prev.filter((id) => id !== contentId));
+        setSavedPlaces((prev) => prev.filter((item) => item.contentId !== contentId));
+        if (selectedId === contentId) {
+          setSelectedId(null);
+        }
       } else {
         const result = await savePlace(tokens.access, { contentId });
         if (result.saved) {
-          setSavedIds((prev) =>
-            prev.includes(result.contentId) ? prev : [...prev, result.contentId],
-          );
+          setSavedPlaces((prev) => {
+            if (prev.some((item) => item.contentId === result.contentId)) {
+              return prev;
+            }
+            const selected = selectedPlace?.id === result.contentId ? selectedPlace : null;
+            return [
+              {
+                userId: '',
+                contentId: result.contentId,
+                createdAt: new Date().toISOString(),
+                place: selected
+                  ? {
+                      contentId: selected.id,
+                      title: selected.name,
+                      addr1: selected.address,
+                      firstImage: null,
+                      lat: selected.latitude,
+                      lng: selected.longitude,
+                      contentTypeId: null,
+                    }
+                  : null,
+              },
+              ...prev,
+            ];
+          });
         }
       }
     } catch (error) {
@@ -248,7 +458,7 @@ export function MapScreen({ route }: Props) {
             ? '찜을 해제하지 못했어요.'
             : '찜하지 못했어요.';
       Alert.alert(wasSaved ? '찜 해제 실패' : '찜하기 실패', message);
-      void refreshSavedIds();
+      void refreshSavedPlaces();
     } finally {
       setSaveBusyId(null);
     }
@@ -267,10 +477,12 @@ export function MapScreen({ route }: Props) {
         onPress={() => {
           Keyboard.dismiss();
           setSelectedId(null);
+          setDropdownOpen(false);
         }}
       >
         {places.map((place) => {
           const active = place.id === selectedId;
+          const saved = savedIds.includes(place.id);
           return (
             <Marker
               key={place.id}
@@ -283,11 +495,18 @@ export function MapScreen({ route }: Props) {
               }}
             >
               <View style={styles.markerWrap}>
-                <View style={[styles.markerBubble, active && styles.markerBubbleActive]}>
+                <View
+                  style={[
+                    styles.markerBubble,
+                    active && styles.markerBubbleActive,
+                    saved && styles.markerBubbleSaved,
+                    saved && active && styles.markerBubbleSavedActive,
+                  ]}
+                >
                   <Ionicons
-                    name="heart"
+                    name={saved ? 'heart' : 'location'}
                     size={16}
-                    color={active ? colors.white : '#101828'}
+                    color={active ? colors.white : saved ? '#E11D48' : '#101828'}
                   />
                 </View>
                 <View style={styles.markerStem} />
@@ -298,26 +517,84 @@ export function MapScreen({ route }: Props) {
       </MapView>
 
       <View style={[styles.topArea, { paddingTop: insets.top + spacing.sm }]} pointerEvents="box-none">
-        <View style={styles.searchBar}>
-          <Ionicons name="search" size={18} color="#99A1AF" />
-          <TextInput
-            style={styles.searchInput}
-            value={query}
-            onChangeText={setQuery}
-            onSubmitEditing={handleSubmitSearch}
-            returnKeyType="search"
-            placeholder="장소, 주소 검색"
-            placeholderTextColor="#99A1AF"
-          />
-          {query.length > 0 ? (
-            <Pressable
-              accessibilityRole="button"
-              accessibilityLabel="검색어 지우기"
-              hitSlop={8}
-              onPress={() => setQuery('')}
-            >
-              <Ionicons name="close-circle" size={18} color="#99A1AF" />
-            </Pressable>
+        <View style={styles.searchBlock}>
+          <View style={styles.searchBar}>
+            <Ionicons name="search" size={18} color="#99A1AF" />
+            <TextInput
+              style={styles.searchInput}
+              value={query}
+              onChangeText={handleQueryChange}
+              onSubmitEditing={handleSubmitSearch}
+              onFocus={() => {
+                if (suggestions.length > 0) {
+                  setDropdownOpen(true);
+                }
+              }}
+              returnKeyType="search"
+              placeholder="장소, 주소 검색"
+              placeholderTextColor="#99A1AF"
+            />
+            {searching ? (
+              <ActivityIndicator size="small" color="#99A1AF" />
+            ) : query.length > 0 ? (
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel="검색어 지우기"
+                hitSlop={8}
+                onPress={() => {
+                  setQuery('');
+                  setSuggestions([]);
+                  setDropdownOpen(false);
+                  setSearching(false);
+                }}
+              >
+                <Ionicons name="close-circle" size={18} color="#99A1AF" />
+              </Pressable>
+            ) : null}
+          </View>
+
+          {dropdownOpen && suggestions.length > 0 ? (
+            <View style={styles.dropdown}>
+              <ScrollView
+                keyboardShouldPersistTaps="handled"
+                nestedScrollEnabled
+                style={styles.dropdownScroll}
+              >
+                {suggestions.map((item) => {
+                  const id = item.contentId ?? item.name;
+                  const alreadySaved = item.contentId
+                    ? savedIds.includes(item.contentId)
+                    : false;
+                  return (
+                    <Pressable
+                      key={id}
+                      accessibilityRole="button"
+                      onPress={() => selectSearchResult(item)}
+                      style={({ pressed }) => [
+                        styles.dropdownItem,
+                        pressed && styles.pressed,
+                      ]}
+                    >
+                      <Ionicons
+                        name={alreadySaved ? 'heart' : 'location-outline'}
+                        size={16}
+                        color={alreadySaved ? '#E11D48' : '#6A7282'}
+                      />
+                      <View style={styles.dropdownCopy}>
+                        <Text style={styles.dropdownTitle} numberOfLines={1}>
+                          {item.name}
+                        </Text>
+                        {item.address ? (
+                          <Text style={styles.dropdownAddress} numberOfLines={1}>
+                            {item.address}
+                          </Text>
+                        ) : null}
+                      </View>
+                    </Pressable>
+                  );
+                })}
+              </ScrollView>
+            </View>
           ) : null}
         </View>
 
@@ -330,20 +607,14 @@ export function MapScreen({ route }: Props) {
           <CategoryChip
             label="전체"
             active={category === null}
-            onPress={() => {
-              Keyboard.dismiss();
-              setCategory(null);
-            }}
+            onPress={() => handleCategoryChange(null)}
           />
           {MAP_CATEGORIES.map((item) => (
             <CategoryChip
               key={item}
               label={item}
               active={category === item}
-              onPress={() => {
-                Keyboard.dismiss();
-                setCategory(category === item ? null : item);
-              }}
+              onPress={() => handleCategoryChange(category === item ? null : item)}
             />
           ))}
         </ScrollView>
@@ -400,7 +671,9 @@ export function MapScreen({ route }: Props) {
                   </Pressable>
                 </View>
                 <Text style={styles.cardAddress} numberOfLines={1}>
-                  {selectedPlace.address} · 현재 위치에서 {selectedPlace.distanceKm}km
+                  {selectedPlace.address
+                    ? selectedPlace.address
+                    : '주소 정보가 없어요'}
                 </Text>
               </View>
               <Pressable
@@ -414,6 +687,7 @@ export function MapScreen({ route }: Props) {
               </Pressable>
             </View>
 
+            {selectedPlace.photoCount > 0 ? (
             <View style={styles.photoRow}>
               {Array.from({ length: Math.min(selectedPlace.photoCount, 3) }).map((_, index) => {
                 const isOverflow = index === 2 && selectedPlace.photoCount > 3;
@@ -430,6 +704,7 @@ export function MapScreen({ route }: Props) {
                 );
               })}
             </View>
+            ) : null}
 
             <View style={styles.diarySectionHeader}>
               <Text style={styles.diarySectionTitle}>관련 다이어리</Text>
@@ -542,6 +817,13 @@ const styles = StyleSheet.create({
   markerBubbleActive: {
     backgroundColor: '#101828',
   },
+  markerBubbleSaved: {
+    borderColor: '#E11D48',
+  },
+  markerBubbleSavedActive: {
+    backgroundColor: '#E11D48',
+    borderColor: '#E11D48',
+  },
   markerStem: {
     width: 4,
     height: 8,
@@ -554,8 +836,11 @@ const styles = StyleSheet.create({
     left: 0,
     right: 0,
   },
-  searchBar: {
+  searchBlock: {
     marginHorizontal: spacing.lg,
+    zIndex: 20,
+  },
+  searchBar: {
     height: 48,
     flexDirection: 'row',
     alignItems: 'center',
@@ -570,6 +855,49 @@ const styles = StyleSheet.create({
     shadowRadius: 8,
     shadowOffset: { width: 0, height: 4 },
     elevation: 4,
+  },
+  dropdown: {
+    marginTop: 6,
+    maxHeight: 240,
+    borderRadius: radii.md,
+    backgroundColor: colors.white,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: '#E5E7EB',
+    overflow: 'hidden',
+    shadowColor: colors.black,
+    shadowOpacity: 0.12,
+    shadowRadius: 10,
+    shadowOffset: { width: 0, height: 4 },
+    elevation: 6,
+  },
+  dropdownScroll: {
+    maxHeight: 240,
+  },
+  dropdownItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    paddingHorizontal: spacing.lg,
+    paddingVertical: 12,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: '#F3F4F6',
+  },
+  dropdownCopy: {
+    flex: 1,
+    minWidth: 0,
+    gap: 2,
+  },
+  dropdownTitle: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#1E2939',
+  },
+  dropdownAddress: {
+    fontSize: 12,
+    color: '#6A7282',
+  },
+  pressed: {
+    opacity: 0.7,
   },
   searchInput: {
     flex: 1,

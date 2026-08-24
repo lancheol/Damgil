@@ -476,6 +476,75 @@ export type PlaceDetailResponseDto = {
   degraded?: boolean;
 };
 
+/** GET /festivals/{contentId} — TourAPI 축제 상세 */
+export type FestivalCommonDto = {
+  contentid?: string;
+  contenttypeid?: string;
+  title?: string;
+  addr1?: string;
+  addr2?: string;
+  zipcode?: string;
+  overview?: string;
+  firstimage?: string;
+  firstimage2?: string;
+  homepage?: string;
+  tel?: string;
+  telname?: string;
+  mapx?: string;
+  mapy?: string;
+  mlevel?: string;
+  areacode?: string;
+  sigungucode?: string;
+  cat1?: string;
+  cat2?: string;
+  cat3?: string;
+  createdtime?: string;
+  modifiedtime?: string;
+};
+
+export type FestivalIntroDto = {
+  eventstartdate?: string;
+  eventenddate?: string;
+  eventplace?: string;
+  eventhomepage?: string;
+  playtime?: string;
+  usetimefestival?: string;
+  spendtimefestival?: string;
+  discountinfofestival?: string;
+  bookingplace?: string;
+  placeinfo?: string;
+  program?: string;
+  subevent?: string;
+  sponsor1?: string;
+  sponsor1tel?: string;
+  sponsor2?: string;
+  sponsor2tel?: string;
+  agelimit?: string;
+  festivaltype?: string;
+  festivalgrade?: string;
+  progresstype?: string;
+  contentid?: string;
+  contenttypeid?: string;
+};
+
+export type PlaceRelatedDto = {
+  contentId: string;
+  contentTypeId: string;
+  title: string;
+  addr1: string;
+  dist: string;
+  img: string;
+};
+
+export type FestivalDetailResponseDto = {
+  common: FestivalCommonDto | null;
+  intro: FestivalIntroDto | null;
+  images: string[];
+  related: PlaceRelatedDto[];
+  course: unknown[];
+  degraded?: boolean;
+};
+
 export class ApiError extends Error {
   status: number;
   code: string;

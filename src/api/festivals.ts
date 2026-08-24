@@ -1,5 +1,5 @@
 import { apiRequest } from './http';
-import type { TourApiResultDto } from './types';
+import type { FestivalDetailResponseDto, TourApiResultDto } from './types';
 
 export type FestivalListQuery = {
   date?: string;
@@ -16,4 +16,11 @@ export function listFestivals(
   if (query.rows != null) params.set('rows', String(query.rows));
   const suffix = params.toString() ? `?${params.toString()}` : '';
   return apiRequest<TourApiResultDto>(`/festivals${suffix}`);
+}
+
+/** GET /festivals/{contentId} — 축제 상세 */
+export function getFestivalDetail(contentId: string): Promise<FestivalDetailResponseDto> {
+  return apiRequest<FestivalDetailResponseDto>(
+    `/festivals/${encodeURIComponent(contentId)}`,
+  );
 }

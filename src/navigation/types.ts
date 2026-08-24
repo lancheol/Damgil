@@ -38,6 +38,7 @@ export type RootStackParamList = {
   ProfileEdit: undefined;
   CreateDiary: undefined;
   FestivalList: undefined;
+  FestivalDetail: { contentId: string; titleHint?: string };
   TravelSubsidy: undefined;
   /** 스택에서 제외됨 — MapRouteScreen 복구용으로만 유지 */
   MapRoute: { placeId: string };

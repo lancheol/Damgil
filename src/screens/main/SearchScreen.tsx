@@ -351,7 +351,12 @@ export function SearchScreen({ navigation }: Props) {
                     key={festival.id}
                     accessibilityRole="button"
                     accessibilityLabel={`${festival.title} 상세`}
-                    onPress={() => navigation.navigate('FestivalList')}
+                    onPress={() =>
+                      navigation.navigate('FestivalDetail', {
+                        contentId: festival.id,
+                        titleHint: festival.title,
+                      })
+                    }
                     style={({ pressed }) => [styles.placeCard, pressed && styles.pressed]}
                   >
                     <View style={styles.placeThumb}>

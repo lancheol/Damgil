@@ -80,6 +80,12 @@ export function FestivalListScreen({ navigation }: Props) {
     <Pressable
       accessibilityRole="button"
       accessibilityLabel={`${item.title} 상세`}
+      onPress={() =>
+        navigation.navigate('FestivalDetail', {
+          contentId: item.id,
+          titleHint: item.title,
+        })
+      }
       style={({ pressed }) => [
         styles.row,
         index === festivals.length - 1 && styles.rowLast,

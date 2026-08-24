@@ -17,6 +17,7 @@ import { DiaryPlacePickScreen } from '../screens/main/DiaryPlacePickScreen';
 import { DiaryRecordDecorateScreen } from '../screens/main/DiaryRecordDecorateScreen';
 import { DiaryRecordDetailScreen } from '../screens/main/DiaryRecordDetailScreen';
 import { FestivalListScreen } from '../screens/main/FestivalListScreen';
+import { FestivalDetailScreen } from '../screens/main/FestivalDetailScreen';
 import { FeedbackScreen } from '../screens/main/FeedbackScreen';
 // import { MapRouteScreen } from '../screens/main/MapRouteScreen'; // 길찾기 일시 비활성
 import { ProfileEditScreen } from '../screens/main/ProfileEditScreen';
@@ -72,6 +73,13 @@ export function RootNavigator() {
             <Stack.Screen
               name="FestivalList"
               component={FestivalListScreen}
+              options={{
+                animation: 'slide_from_right',
+              }}
+            />
+            <Stack.Screen
+              name="FestivalDetail"
+              component={FestivalDetailScreen}
               options={{
                 animation: 'slide_from_right',
               }}
