@@ -32,6 +32,10 @@ import { loadTokens } from '../../api/tokenStorage';
 import { ApiError, SavedPlaceItemDto } from '../../api/types';
 import { mapPlaceFromSaved } from '../../utils/savedMapPlaces';
 import {
+  loadMapLocationPrefs,
+  saveMapLocationPrefs,
+} from '../../utils/mapLocationPrefs';
+import {
   MapLocation,
   mapPlaceFromSearch,
   searchTravelPlaces,
@@ -57,10 +61,15 @@ type PlaceRelatedDiary = {
   coverThumbUrl: string | null;
 };
 
-const MARKER_TRACK_MS = 500;
 /** 카드가 마커를 가리지 않도록 지도를 살짝 위로 밀어주는 값 */
 const FOCUS_LAT_OFFSET = 0.006;
 const SHEET_MAX_HEIGHT = Math.round(Dimensions.get('window').height * 0.48);
+
+/** 세션 중 빠른 복원용 (앱 재시작 시 AsyncStorage에서 다시 채움) */
+let memoryShowsUserLocation = false;
+let memoryMapRegion: Region | null = null;
+let didFitSavedPinsOnce = false;
+let prefsHydrated = false;
 
 /** TODO: 장소 contentId 기준 관련 공개 다이어리 API로 교체 */
 const MOCK_RELATED_DIARIES: PlaceRelatedDiary[] = [
@@ -98,8 +107,11 @@ export function MapScreen({ route }: Props) {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [savedPlaces, setSavedPlaces] = useState<SavedPlaceItemDto[]>([]);
   const [saveBusyId, setSaveBusyId] = useState<string | null>(null);
-  const [trackMarkers, setTrackMarkers] = useState(true);
-  const [showsUserLocation, setShowsUserLocation] = useState(false);
+  const [showsUserLocation, setShowsUserLocation] = useState(memoryShowsUserLocation);
+  const [mapReady, setMapReady] = useState(prefsHydrated);
+  const [initialRegion, setInitialRegion] = useState<Region>(
+    memoryMapRegion ?? MAP_INITIAL_REGION,
+  );
   /** TODO: 장소 contentId 기준 관련 다이어리 API로 교체 */
   const [relatedDiaries, setRelatedDiaries] = useState<PlaceRelatedDiary[]>([]);
   const [relatedLoading, setRelatedLoading] = useState(false);
@@ -269,21 +281,90 @@ export function MapScreen({ route }: Props) {
     }
   }, []);
 
+  const persistPrefs = useCallback(
+    (next: { showsUserLocation?: boolean; region?: Region | null }) => {
+      if (typeof next.showsUserLocation === 'boolean') {
+        memoryShowsUserLocation = next.showsUserLocation;
+      }
+      if (next.region !== undefined) {
+        memoryMapRegion = next.region;
+      }
+      void saveMapLocationPrefs({
+        showsUserLocation: memoryShowsUserLocation,
+        region: memoryMapRegion,
+      });
+    },
+    [],
+  );
+
+  useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      const prefs = await loadMapLocationPrefs();
+      if (cancelled) {
+        return;
+      }
+
+      // 권한은 OS가 정본. AsyncStorage의 showsUserLocation은 UI 선호일 뿐.
+      const permission = await Location.getForegroundPermissionsAsync();
+      const shows = Boolean(prefs.showsUserLocation && permission.granted);
+
+      memoryShowsUserLocation = shows;
+      memoryMapRegion = prefs.region;
+      prefsHydrated = true;
+      setShowsUserLocation(shows);
+      if (prefs.region) {
+        setInitialRegion(prefs.region);
+      }
+      setMapReady(true);
+
+      if (shows !== prefs.showsUserLocation) {
+        void saveMapLocationPrefs({
+          showsUserLocation: shows,
+          region: prefs.region,
+        });
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
   useFocusEffect(
     useCallback(() => {
       void refreshSavedPlaces();
+      void (async () => {
+        // 이미 허용된 경우만 내 위치 점 복원. request()는 절대 자동 호출하지 않음.
+        const permission = await Location.getForegroundPermissionsAsync();
+        if (!permission.granted || !memoryShowsUserLocation) {
+          if (!permission.granted && memoryShowsUserLocation) {
+            memoryShowsUserLocation = false;
+            setShowsUserLocation(false);
+            void saveMapLocationPrefs({
+              showsUserLocation: false,
+              region: memoryMapRegion,
+            });
+          }
+          return;
+        }
+        setShowsUserLocation(true);
+      })();
     }, [refreshSavedPlaces]),
   );
 
-  const didFitSavedRef = useRef(false);
   useEffect(() => {
-    if (didFitSavedRef.current || route.params?.focusPlace) {
+    if (
+      didFitSavedPinsOnce ||
+      route.params?.focusPlace ||
+      memoryShowsUserLocation ||
+      memoryMapRegion
+    ) {
       return;
     }
     if (savedPins.length === 0) {
       return;
     }
-    didFitSavedRef.current = true;
+    didFitSavedPinsOnce = true;
     mapRef.current?.fitToCoordinates(
       savedPins.map((place) => ({
         latitude: place.latitude,
@@ -295,12 +376,6 @@ export function MapScreen({ route }: Props) {
       },
     );
   }, [savedPins, route.params?.focusPlace]);
-
-  useEffect(() => {
-    setTrackMarkers(true);
-    const timer = setTimeout(() => setTrackMarkers(false), MARKER_TRACK_MS);
-    return () => clearTimeout(timer);
-  }, [places, selectedId]);
 
   useEffect(() => {
     if (!selectedId) {
@@ -384,23 +459,29 @@ export function MapScreen({ route }: Props) {
 
   const handleMoveToUser = async () => {
     const current = await Location.getForegroundPermissionsAsync();
+    // 이미 허용됐으면 시스템 팝업 없이 바로 사용 (카메라와 동일)
     const granted = current.granted
       ? true
       : (await Location.requestForegroundPermissionsAsync()).granted;
 
     if (!granted) {
-      Alert.alert('위치 권한 필요', '설정에서 위치 접근을 허용하면 현재 위치를 볼 수 있어요.');
+      Alert.alert(
+        '위치 권한 필요',
+        '설정 > Damgil(또는 Expo Go) > 위치에서 "앱을 사용하는 동안"으로 허용해 주세요.\n"한 번 허용"을 고르면 앱을 다시 켤 때마다 물어볼 수 있어요.',
+      );
       return;
     }
 
     setShowsUserLocation(true);
     const position = await Location.getCurrentPositionAsync({});
-    moveTo({
+    const nextRegion: Region = {
       latitude: position.coords.latitude,
       longitude: position.coords.longitude,
       latitudeDelta: 0.01,
       longitudeDelta: 0.01,
-    });
+    };
+    persistPrefs({ showsUserLocation: true, region: nextRegion });
+    moveTo(nextRegion);
   };
 
   const toggleSaved = async (contentId: string) => {
@@ -466,14 +547,18 @@ export function MapScreen({ route }: Props) {
 
   return (
     <View style={styles.root}>
+      {mapReady ? (
       <MapView
         ref={mapRef}
         style={StyleSheet.absoluteFill}
-        initialRegion={MAP_INITIAL_REGION}
+        initialRegion={initialRegion}
         showsUserLocation={showsUserLocation}
         showsMyLocationButton={false}
         showsCompass={false}
         toolbarEnabled={false}
+        onRegionChangeComplete={(region) => {
+          persistPrefs({ region });
+        }}
         onPress={() => {
           Keyboard.dismiss();
           setSelectedId(null);
@@ -483,38 +568,26 @@ export function MapScreen({ route }: Props) {
         {places.map((place) => {
           const active = place.id === selectedId;
           const saved = savedIds.includes(place.id);
+          // 네이티브 기본 핀: 선택 > 찜 > 일반
+          const pinColor = active ? '#2F6BFF' : saved ? '#E11D48' : '#101828';
           return (
             <Marker
               key={place.id}
               coordinate={{ latitude: place.latitude, longitude: place.longitude }}
-              anchor={{ x: 0.5, y: 1 }}
-              tracksViewChanges={trackMarkers}
+              pinColor={pinColor}
               onPress={(event) => {
                 event.stopPropagation();
                 focusPlace(place);
               }}
-            >
-              <View style={styles.markerWrap}>
-                <View
-                  style={[
-                    styles.markerBubble,
-                    active && styles.markerBubbleActive,
-                    saved && styles.markerBubbleSaved,
-                    saved && active && styles.markerBubbleSavedActive,
-                  ]}
-                >
-                  <Ionicons
-                    name={saved ? 'heart' : 'location'}
-                    size={16}
-                    color={active ? colors.white : saved ? '#E11D48' : '#101828'}
-                  />
-                </View>
-                <View style={styles.markerStem} />
-              </View>
-            </Marker>
+            />
           );
         })}
       </MapView>
+      ) : (
+        <View style={styles.mapLoading}>
+          <ActivityIndicator color={colors.ink} />
+        </View>
+      )}
 
       <View style={[styles.topArea, { paddingTop: insets.top + spacing.sm }]} pointerEvents="box-none">
         <View style={styles.searchBlock}>
@@ -801,34 +874,11 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: '#F8F9FA',
   },
-  markerWrap: {
-    alignItems: 'center',
-  },
-  markerBubble: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
+  mapLoading: {
+    ...StyleSheet.absoluteFillObject,
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: colors.white,
-    borderWidth: 2,
-    borderColor: '#101828',
-  },
-  markerBubbleActive: {
-    backgroundColor: '#101828',
-  },
-  markerBubbleSaved: {
-    borderColor: '#E11D48',
-  },
-  markerBubbleSavedActive: {
-    backgroundColor: '#E11D48',
-    borderColor: '#E11D48',
-  },
-  markerStem: {
-    width: 4,
-    height: 8,
-    marginTop: 2,
-    backgroundColor: '#1E2939',
+    backgroundColor: '#F8F9FA',
   },
   topArea: {
     position: 'absolute',
