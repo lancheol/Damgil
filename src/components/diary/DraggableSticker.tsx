@@ -18,6 +18,7 @@ type DraggableStickerProps = {
   sticker: DecorSticker;
   selected: boolean;
   editable?: boolean;
+  layoutUnit?: number;
   layoutRef: MutableRefObject<{ width: number; height: number }>;
   onSelect: () => void;
   onMove: (x: number, y: number) => void;
@@ -62,6 +63,7 @@ export function DraggableSticker({
   sticker,
   selected,
   editable = true,
+  layoutUnit = 1,
   layoutRef,
   onSelect,
   onMove,
@@ -184,10 +186,11 @@ export function DraggableSticker({
     }),
   ).current;
 
-  const emojiSize = 28;
-  const selectPad = 5;
+  const unit = layoutUnit;
+  const emojiSize = 28 * unit;
+  const selectPad = 5 * unit;
   const visualSize = emojiSize + selectPad * 2;
-  const hitSize = 72;
+  const hitSize = 72 * unit;
 
   return (
     <View

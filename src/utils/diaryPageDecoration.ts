@@ -29,6 +29,7 @@ export function createDefaultPhotoLayer(
 export function normalizePlacePageDecoration(
   decoration: PlacePageDecoration | null | undefined,
   fallbackPhotoId?: string | null,
+  fallbackPhotoIds?: string[] | null,
 ): PlacePageDecoration {
   const photos: DecorPhotoLayer[] = Array.isArray(decoration?.photos)
     ? decoration!.photos.map((item) => ({
@@ -47,8 +48,21 @@ export function normalizePlacePageDecoration(
     : [];
   const texts: DecorTextLayer[] = Array.isArray(decoration?.texts) ? decoration!.texts : [];
 
-  if (photos.length === 0 && fallbackPhotoId) {
-    photos.push(createDefaultPhotoLayer(fallbackPhotoId));
+  if (photos.length === 0) {
+    const ids =
+      fallbackPhotoIds?.filter(Boolean).length
+        ? [...new Set(fallbackPhotoIds!.filter(Boolean))]
+        : fallbackPhotoId
+          ? [fallbackPhotoId]
+          : [];
+    ids.forEach((photoId, index) => {
+      photos.push(
+        createDefaultPhotoLayer(photoId, {
+          x: 0.5 + (index - (ids.length - 1) / 2) * 0.12,
+          y: 0.42 + index * 0.04,
+        }),
+      );
+    });
   }
 
   return {

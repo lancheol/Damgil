@@ -1,4 +1,4 @@
-import { TextStyle } from 'react-native';
+import { Dimensions, TextStyle } from 'react-native';
 
 import { clampStickerScale, normalizeRotation } from '../utils/stickerTransform';
 import {
@@ -9,6 +9,7 @@ import {
   DiaryCover,
   DiaryPhoto,
 } from '../types/diary';
+import { spacing } from '../theme';
 import { DECOR_FONTS, DECOR_STICKER_EMOJIS, getDecorFontStyle } from './decorAssets';
 import { createPhotoLayerId } from './diaryPageDecoration';
 import { normalizeCropRect } from './diaryTextLayers';
@@ -22,6 +23,25 @@ export const DEFAULT_COVER_TITLE_X = 0.5;
 export const DEFAULT_COVER_TITLE_Y = 0.5;
 export const DEFAULT_COVER_TITLE_SCALE = 1;
 export const DEFAULT_COVER_TITLE_ROTATION = 0;
+
+/** 표지 편집 화면(HomeBookShell) 기준 캔버스 너비 — 레이어 px 상수의 기준 */
+export function estimateCoverEditCanvasWidth(
+  windowWidth = Dimensions.get('window').width,
+): number {
+  const bookMargin = spacing.xl * 2;
+  const spineWidth = 18;
+  const contentPad = 4 + 8;
+  return Math.max(1, windowWidth - bookMargin - spineWidth - contentPad);
+}
+
+/** 표지 레이어(사진·텍스트) px 상수를 현재 캔버스 너비에 맞게 스케일 */
+export function getCoverLayoutUnit(canvasWidth: number): number {
+  const refWidth = estimateCoverEditCanvasWidth();
+  if (!Number.isFinite(canvasWidth) || canvasWidth <= 0) {
+    return 1;
+  }
+  return canvasWidth / Math.max(refWidth, 1);
+}
 
 export function clampCoverTitleAxis(value: number | undefined, fallback: number): number {
   if (typeof value !== 'number' || Number.isNaN(value)) {
@@ -92,6 +112,17 @@ export function createEmptyCover(title: string): DiaryCover {
     backgroundColor: DEFAULT_COVER_COLOR,
     updatedAt: new Date().toISOString(),
   };
+}
+
+/** 표지에 꾸미기 레이어(사진·스티커·텍스트)가 있는지 */
+export function hasCoverDecorationLayout(cover: DiaryCover | null | undefined): boolean {
+  if (!cover) return false;
+  return Boolean(
+    cover.coverPhotoId ||
+      cover.photos?.length ||
+      cover.stickers?.length ||
+      cover.texts?.length,
+  );
 }
 
 export function getEffectiveCover(diary: Diary | null | undefined): DiaryCover {

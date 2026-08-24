@@ -1,6 +1,15 @@
 export type DiaryMediaType = 'photo' | 'video';
 
-export type DecorFontId = 'sans' | 'serif' | 'mono' | 'rounded' | 'hand' | 'display';
+export type DecorFontId =
+  | 'sans'
+  | 'serif'
+  | 'mono'
+  | 'rounded'
+  | 'hand'
+  | 'display'
+  | 'kedu'
+  | 'keduBold'
+  | 'keduLine';
 
 export type DecorSticker = {
   id: string;

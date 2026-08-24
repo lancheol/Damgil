@@ -11,8 +11,10 @@ export type DiaryPlaceGroup = {
   latitude: number;
   longitude: number;
   placeName: string;
-  /** 해당 장소에 반영되는 촬영물 1장 */
+  /** 해당 장소에 반영되는 촬영물 1장 (대표) */
   photo: DiaryPhoto;
+  /** 같은 GPS의 모든 촬영물 */
+  photos: DiaryPhoto[];
   firstCapturedAt: string;
 };
 
@@ -46,6 +48,7 @@ export function buildPlaceGroups(photos: DiaryPhoto[]): DiaryPlaceGroup[] {
       longitude: first.longitude,
       placeName: (first.placeName ?? '').trim() || '장소 미지정',
       photo: first,
+      photos: sorted,
       firstCapturedAt: first.createdAt,
     });
   }
@@ -55,14 +58,14 @@ export function buildPlaceGroups(photos: DiaryPhoto[]): DiaryPlaceGroup[] {
   );
 }
 
-/** 장소당 촬영물 1장으로 placeSelections 생성 */
+/** 장소별 촬영물 — 같은 GPS면 photoIds에 전부 포함 */
 export function buildPlaceSelections(photos: DiaryPhoto[]): DiaryPlaceSelection[] {
   return buildPlaceGroups(photos).map((group) => ({
     id: group.id,
     latitude: group.latitude,
     longitude: group.longitude,
     placeName: group.placeName,
-    photoIds: [group.photo.id],
+    photoIds: group.photos.map((photo) => photo.id),
     representativePhotoId: group.photo.id,
     placeContentId: group.photo.placeContentId ?? null,
   }));

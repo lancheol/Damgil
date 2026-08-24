@@ -57,9 +57,10 @@ export function getDayNumberForPhoto(diary: Diary, photo: DiaryPhoto): number {
 /** 촬영 시각 기준 일자 그룹 + 일차 + 그룹 내 오름차순 정렬 */
 export function buildDiaryTimeline(diary: Diary): TimelineDayGroup[] {
   const startKey = toLocalDateKey(diary.createdAt);
-  const photos = [...(diary.photos ?? [])].sort(
-    (a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime(),
-  );
+  // 표지 전용 media-{id} 사진은 타임라인에서 제외
+  const photos = [...(diary.photos ?? [])]
+    .filter((photo) => !photo.id.startsWith('media-'))
+    .sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime());
 
   const byDate = new Map<string, DiaryPhoto[]>();
   for (const photo of photos) {

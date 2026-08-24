@@ -2,6 +2,29 @@ import { Platform, TextStyle } from 'react-native';
 
 import { DecorFontId } from '../types/diary';
 
+/** expo-font 로드 키와 Text style.fontFamily에 동일하게 사용 */
+export const KERIS_KEDU_FONT_FAMILY = {
+  regular: 'KerisKedu',
+  bold: 'KerisKeduBold',
+  line: 'KerisKeduLine',
+} as const;
+
+export const DECOR_FONT_IDS: DecorFontId[] = [
+  'sans',
+  'serif',
+  'mono',
+  'rounded',
+  'hand',
+  'display',
+  'kedu',
+  'keduBold',
+  'keduLine',
+];
+
+export function isDecorFontId(value: unknown): value is DecorFontId {
+  return typeof value === 'string' && DECOR_FONT_IDS.includes(value as DecorFontId);
+}
+
 export const DECOR_FONTS: {
   id: DecorFontId;
   label: string;
@@ -67,6 +90,27 @@ export const DECOR_FONTS: {
         default: undefined,
       }),
       letterSpacing: 1.2,
+    },
+  },
+  {
+    id: 'kedu',
+    label: '케듀',
+    style: {
+      fontFamily: KERIS_KEDU_FONT_FAMILY.regular,
+    },
+  },
+  {
+    id: 'keduBold',
+    label: '케듀 Bold',
+    style: {
+      fontFamily: KERIS_KEDU_FONT_FAMILY.bold,
+    },
+  },
+  {
+    id: 'keduLine',
+    label: '케듀 Line',
+    style: {
+      fontFamily: KERIS_KEDU_FONT_FAMILY.line,
     },
   },
 ];

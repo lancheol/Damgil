@@ -1,4 +1,4 @@
-import { useRef } from 'react';
+import { useRef, useState } from 'react';
 import { Pressable, StyleSheet, View, ViewStyle } from 'react-native';
 
 import { DraggableCoverTitle } from './DraggableCoverTitle';
@@ -19,6 +19,8 @@ import {
   DEFAULT_COVER_TITLE_Y,
   DEFAULT_COVER_TITLE_SCALE,
   DEFAULT_COVER_TITLE_ROTATION,
+  estimateCoverEditCanvasWidth,
+  getCoverLayoutUnit,
   resolveCoverTitleColor,
 } from '../../utils/diaryCover';
 
@@ -121,6 +123,10 @@ export function CoverCanvas({
   onTitleDragEnd,
 }: CoverCanvasProps) {
   const layoutRef = useRef({ width: 1, height: 1 });
+  const [canvasSize, setCanvasSize] = useState({ width: 0, height: 0 });
+  const layoutUnit = getCoverLayoutUnit(
+    canvasSize.width > 0 ? canvasSize.width : estimateCoverEditCanvasWidth(),
+  );
   const photosRef = useRef(photos);
   const stickersRef = useRef(stickers);
   const textsRef = useRef(texts);
@@ -203,10 +209,13 @@ export function CoverCanvas({
       ]}
       {...(editable ? pinchHandlers : {})}
       onLayout={(event) => {
-        layoutRef.current = {
-          width: event.nativeEvent.layout.width,
-          height: event.nativeEvent.layout.height,
-        };
+        const { width, height } = event.nativeEvent.layout;
+        layoutRef.current = { width, height };
+        if (width > 0 && height > 0) {
+          setCanvasSize((prev) =>
+            prev.width === width && prev.height === height ? prev : { width, height },
+          );
+        }
       }}
     >
       {editable ? (
@@ -223,6 +232,7 @@ export function CoverCanvas({
             key={layer.id}
             layer={layer}
             uri={source.uri}
+            layoutUnit={layoutUnit}
             selected={editable && selectedPhotoId === layer.id}
             layoutRef={layoutRef}
             onSelect={() => onSelectPhoto?.(layer.id)}
@@ -240,6 +250,7 @@ export function CoverCanvas({
         <DraggableText
           key={layer.id}
           layer={layer}
+          layoutUnit={layoutUnit}
           selected={editable && selectedTextId === layer.id}
           editable={editable}
           layoutRef={layoutRef}
@@ -258,6 +269,7 @@ export function CoverCanvas({
         <DraggableSticker
           key={sticker.id}
           sticker={sticker}
+          layoutUnit={layoutUnit}
           selected={editable && selectedStickerId === sticker.id}
           editable={editable}
           layoutRef={layoutRef}
@@ -279,6 +291,7 @@ export function CoverCanvas({
         y={titleY}
         scale={titleScale}
         rotation={titleRotation}
+        layoutUnit={layoutUnit}
         selected={editable && selectedTitle}
         editable={editable}
         layoutRef={layoutRef}

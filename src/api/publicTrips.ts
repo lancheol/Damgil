@@ -1,5 +1,6 @@
 import { apiRequest } from './http';
 import type { PublicTripDetailDto, PublicTripListItemDto } from './types';
+import { fetchPublicTripCached } from '../utils/publicTripCache';
 
 export function listPublicTrips(query: {
   regionId?: string;
@@ -15,5 +16,5 @@ export function listPublicTrips(query: {
 }
 
 export function getPublicTrip(tripId: string): Promise<PublicTripDetailDto> {
-  return apiRequest<PublicTripDetailDto>(`/public/trips/${tripId}`);
+  return fetchPublicTripCached(tripId);
 }

@@ -5,6 +5,7 @@ import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Alert,
+  ActivityIndicator,
   Dimensions,
   Image,
   Pressable,
@@ -21,8 +22,6 @@ import { SEARCH_USERS } from '../../constants/users';
 import { useAuth } from '../../context/AuthContext';
 import { useDiaries } from '../../context/DiaryContext';
 import { getPublicFeed } from '../../api/feed';
-import { getMediaDisplayUri } from '../../api/media';
-import { getPublicTrip } from '../../api/publicTrips';
 import { loadTokens } from '../../api/tokenStorage';
 import { MainTabParamList, RootStackParamList } from '../../navigation/types';
 import { Diary } from '../../types/diary';
@@ -35,9 +34,13 @@ import {
   coverFromStickerLayout,
   feedCardToDiaryStub,
   feedItemToCard,
+  mergeFeedCardMedia,
   type FeedDiaryCard,
 } from '../../utils/feedMapper';
+import { enrichFeedCardsFromPublicTrips } from '../../utils/feedEnrichment';
 import { isDiaryPublished } from '../../utils/tripStatus';
+
+const FEED_RELOAD_COOLDOWN_MS = 45_000;
 
 type Props = CompositeScreenProps<
   BottomTabScreenProps<MainTabParamList, 'Search'>,
@@ -90,6 +93,7 @@ export function SearchScreen({ navigation }: Props) {
   const [openingId, setOpeningId] = useState<string | null>(null);
   const feedRequestRef = useRef(0);
   const feedLoadedRef = useRef(false);
+  const lastFeedLoadAtRef = useRef(0);
 
   useEffect(() => {
     let cancelled = false;
@@ -112,89 +116,72 @@ export function SearchScreen({ navigation }: Props) {
     try {
       const tokens = await loadTokens();
       if (!tokens?.access) {
-        if (feedRequestRef.current === requestId) setFeedCards([]);
+        // 토큰이 아직 없으면 실패로 끝내지 않고 재시도 여지를 남긴다
+        if (feedRequestRef.current === requestId) {
+          setFeedLoading(false);
+          feedLoadedRef.current = false;
+        }
         return;
       }
+
       const feed = await getPublicFeed(tokens.access, {
         page: 1,
         limit: 12,
         sort: 'recent',
       });
-      const cards = await Promise.all(
-        feed.items.map(async (item) => {
-          let coverThumbUrl: string | null = null;
-          let cover = coverFromStickerLayout(
-            item.title?.trim() || '여행 다이어리',
-            null,
-            null,
-          );
-          let photos: Diary['photos'] = [];
+      if (feedRequestRef.current !== requestId) return;
 
-          try {
-            const detail = await getPublicTrip(item.id);
-            cover = coverFromStickerLayout(
-              detail.title?.trim() || item.title?.trim() || '여행 다이어리',
-              detail.coverTitleFont,
-              detail.coverStickerLayout,
-            );
-            coverThumbUrl = detail.coverUrl?.trim() || null;
+      const items = feed.items ?? [];
 
-            const mediaEntries = await Promise.all(
-              (detail.items ?? []).map(async (tripItem) => {
-                if (!tripItem.mediaId || !tokens.access) {
-                  return [tripItem.id, null] as const;
-                }
-                try {
-                  return [
-                    tripItem.id,
-                    await getMediaDisplayUri(tokens.access, tripItem.mediaId),
-                  ] as const;
-                } catch {
-                  return [tripItem.id, null] as const;
-                }
-              }),
-            );
-            const uriByItemId = Object.fromEntries(mediaEntries);
-            photos = (detail.items ?? []).map((tripItem) => ({
-              id: tripItem.id,
-              uri: uriByItemId[tripItem.id] ?? '',
-              mediaType: tripItem.kind === 'video' ? 'video' : 'photo',
-              mediaId: tripItem.mediaId ?? null,
-              placeName: null,
-              note: tripItem.note?.trim() || '',
-              latitude: tripItem.lat ?? 0,
-              longitude: tripItem.lng ?? 0,
-              placeContentId:
-                tripItem.confirmedPlaceContentId || tripItem.placeContentId || null,
-              createdAt: tripItem.capturedAt,
-            }));
-          } catch {
-            // 공개 상세 실패 시 피드 썸네일만으로 폴백
-          }
-
-          if (!coverThumbUrl && item.coverMediaId) {
-            try {
-              coverThumbUrl = await getMediaDisplayUri(tokens.access, item.coverMediaId);
-            } catch {
-              coverThumbUrl = null;
-            }
-          }
-
-          return feedItemToCard(item, coverThumbUrl, { cover, photos });
+      // 1) 피드 목록만 먼저 표시 — 미디어·상세 API는 호출하지 않는다
+      const stubs = items.map((item) =>
+        feedItemToCard(item, null, {
+          cover: coverFromStickerLayout(item.title?.trim() || '여행 다이어리', null, null),
+          photos: [],
         }),
       );
-      if (feedRequestRef.current === requestId) setFeedCards(cards);
+      if (feedRequestRef.current !== requestId) return;
+
+      setFeedCards((prev) => {
+        const prevById = new Map(prev.map((card) => [card.id, card]));
+        return stubs.map((card) => mergeFeedCardMedia(card, prevById.get(card.id)));
+      });
+      setFeedLoading(false);
+      feedLoadedRef.current = true;
+      lastFeedLoadAtRef.current = Date.now();
+
+      // 2) 상단 카드 우선, 동시 3건으로 꾸미기 표지 보강
+      await enrichFeedCardsFromPublicTrips(items, tokens.access, {
+        concurrency: 3,
+        priorityIds: items.slice(0, 6).map((item) => item.id),
+        isCancelled: () => feedRequestRef.current !== requestId,
+        onCardEnriched: (enriched) => {
+          setFeedCards((prev) =>
+            prev.map((card) =>
+              card.id === enriched.id ? mergeFeedCardMedia(enriched, card) : card,
+            ),
+          );
+        },
+      });
     } catch {
-      if (feedRequestRef.current === requestId) setFeedCards([]);
-    } finally {
-      if (feedRequestRef.current === requestId) setFeedLoading(false);
+      if (feedRequestRef.current === requestId) {
+        if (!silent) setFeedCards([]);
+        setFeedLoading(false);
+        feedLoadedRef.current = false;
+      }
     }
   }, []);
 
   useFocusEffect(
     useCallback(() => {
+      const now = Date.now();
+      if (
+        feedLoadedRef.current &&
+        now - lastFeedLoadAtRef.current < FEED_RELOAD_COOLDOWN_MS
+      ) {
+        return;
+      }
       const silent = feedLoadedRef.current;
-      feedLoadedRef.current = true;
       void loadFeed(silent);
     }, [loadFeed]),
   );
@@ -464,20 +451,26 @@ export function SearchScreen({ navigation }: Props) {
 
           <Text style={styles.sectionTitle}>요즘 뜨는 여행 다이어리</Text>
 
-          <View style={styles.grid}>
-            {cells.map((cell) =>
-              cell.kind === 'placeholder' ? (
-                <View key={cell.key} style={[styles.thumb, { backgroundColor: cell.tone }]} />
-              ) : (
-                <FeedDiaryCell
-                  key={cell.key}
-                  card={cell.card}
-                  busy={openingId === cell.card.id}
-                  onPress={() => void openFeedDiary(cell.card)}
-                />
-              ),
-            )}
-          </View>
+          {feedLoading && feedCards.length === 0 ? (
+            <View style={styles.feedLoading}>
+              <ActivityIndicator color={colors.ink} />
+            </View>
+          ) : (
+            <View style={styles.grid}>
+              {cells.map((cell) =>
+                cell.kind === 'placeholder' ? (
+                  <View key={cell.key} style={[styles.thumb, { backgroundColor: cell.tone }]} />
+                ) : (
+                  <FeedDiaryCell
+                    key={cell.key}
+                    card={cell.card}
+                    busy={openingId === cell.card.id}
+                    onPress={() => void openFeedDiary(cell.card)}
+                  />
+                ),
+              )}
+            </View>
+          )}
           {!feedLoading && feedCards.length === 0 ? (
             <Text style={styles.feedEmptyText}>아직 공개된 여행 다이어리가 없어요.</Text>
           ) : null}
@@ -659,6 +652,12 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     color: '#1E2939',
   },
+  feedLoading: {
+    marginTop: 24,
+    minHeight: 120,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
   feedEmptyText: {
     marginTop: 12,
     fontSize: 13,
@@ -780,7 +779,7 @@ const styles = StyleSheet.create({
   },
   thumb: {
     width: CARD_WIDTH,
-    height: CARD_WIDTH * 1.25,
+    height: CARD_WIDTH * (4 / 3),
     borderRadius: 12,
     backgroundColor: '#F3F4F6',
     overflow: 'hidden',

@@ -6,12 +6,11 @@ import {
   PhotoCropRect,
   PhotoDecoration,
 } from '../types/diary';
+import { isDecorFontId } from './decorAssets';
 import { createTextLayer, buildPhotoDecoration } from './diaryTextLayers';
 
-const FONT_IDS: DecorFontId[] = ['sans', 'serif', 'mono', 'rounded', 'hand', 'display'];
-
 function asFontId(value: unknown): DecorFontId {
-  return FONT_IDS.includes(value as DecorFontId) ? (value as DecorFontId) : 'sans';
+  return isDecorFontId(value) ? value : 'sans';
 }
 
 function asStickers(value: unknown): DecorSticker[] {

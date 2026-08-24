@@ -163,6 +163,9 @@ export type TripItemDto = {
   mediaId: string | null;
   confirmedPlaceContentId: string | null;
   isManuallyEdited: boolean;
+  /** 공개 상세 등에서 함께 내려주는 presigned URL (Swagger 외 라이브 필드) */
+  mediaUrl?: string | null;
+  thumbUrl?: string | null;
 };
 
 export type MatchedPlaceDto = {

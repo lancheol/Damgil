@@ -1,12 +1,12 @@
-const USERNAME_PATTERN = /^[a-z0-9._]{1,30}$/;
+const USERNAME_PATTERN = /^[A-Za-z0-9._]{1,30}$/;
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const PHONE_PATTERN = /^01[016789]\d{7,8}$/;
 
 export const NICKNAME_MAX_LENGTH = 30;
-export const NICKNAME_RULE_HINT = '영문 소문자, 숫자, _, . 만 사용 (최대 30자)';
+export const NICKNAME_RULE_HINT = '영문, 숫자, _, . 만 사용 (최대 30자)';
 
 export function normalizeNickname(value: string): string {
-  return value.trim().toLowerCase();
+  return value.trim();
 }
 
 export function isValidUsername(username: string): boolean {

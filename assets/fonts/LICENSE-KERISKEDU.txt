@@ -1,0 +1,11 @@
+Keris Kedu (케리스 케듀체)
+Copyright: KERIS (한국교육학술정보원) / Together Group
+
+This font is distributed under the SIL Open Font License (OFL), Version 1.1.
+Official source: https://copyright.keris.or.kr
+
+Embedding in applications, commercial use, modification, and redistribution
+are permitted under OFL. Selling the font files themselves is not permitted.
+Source attribution is not required by the KERIS school-safe font guidance.
+
+Full OFL text: https://openfontlicense.org/open-font-license-official-text/

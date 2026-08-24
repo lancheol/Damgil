@@ -21,6 +21,7 @@ type Props = {
   y: number;
   scale?: number;
   rotation?: number;
+  layoutUnit?: number;
   selected: boolean;
   editable: boolean;
   layoutRef: MutableRefObject<{ width: number; height: number }>;
@@ -71,6 +72,7 @@ export function DraggableCoverTitle({
   y,
   scale = 1,
   rotation = 0,
+  layoutUnit = 1,
   selected,
   editable,
   layoutRef,
@@ -212,6 +214,8 @@ export function DraggableCoverTitle({
     }),
   ).current;
 
+  const unit = layoutUnit;
+
   return (
     <View
       {...(editable ? panResponder.panHandlers : {})}
@@ -234,11 +238,24 @@ export function DraggableCoverTitle({
       <View
         style={[
           styles.visual,
+          {
+            paddingHorizontal: 12 * unit,
+            paddingVertical: 8 * unit,
+            borderRadius: 8 * unit,
+            maxWidth: 260 * unit,
+          },
           selected && editable ? styles.selected : null,
           { transform: [{ scale }, { rotate: `${rotation}deg` }] },
         ]}
       >
-        <Text style={[styles.title, getCoverFontStyle(fontId), { color }]} numberOfLines={4}>
+        <Text
+          style={[
+            styles.title,
+            getCoverFontStyle(fontId),
+            { color, fontSize: 28 * unit },
+          ]}
+          numberOfLines={4}
+        >
           {title || '제목 없음'}
         </Text>
       </View>
@@ -254,10 +271,7 @@ const styles = StyleSheet.create({
     zIndex: 4,
   },
   visual: {
-    paddingHorizontal: 12,
-    paddingVertical: 8,
     borderRadius: 8,
-    maxWidth: 260,
   },
   selected: {
     borderWidth: 1,
@@ -265,7 +279,6 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(255,255,255,0.12)',
   },
   title: {
-    fontSize: 28,
     textAlign: 'center',
     letterSpacing: -0.5,
   },

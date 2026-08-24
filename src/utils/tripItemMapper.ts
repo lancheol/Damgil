@@ -28,10 +28,10 @@ function toDiaryPhoto(
 
   return {
     id: item.id,
-    uri: local?.uri || serverUri || '',
+    uri: local?.uri || serverUri || item.mediaUrl?.trim() || item.thumbUrl?.trim() || '',
     mediaType: item.kind === 'video' ? 'video' : 'photo',
     mediaId: item.mediaId ?? local?.mediaId ?? null,
-    placeName: local?.placeName ?? null,
+    placeName: local?.placeName ?? (item.note?.trim() || null),
     note: item.note?.trim() || local?.note || '',
     latitude,
     longitude,
@@ -77,12 +77,14 @@ export function applyTimelineToDiary(
     local.photos ?? [],
     mediaUrisByItemId,
   );
+  const status = toDiaryStatus(timeline.status ?? local.status);
   const nextDiary: Diary = {
     ...local,
     name: timeline.title?.trim() || local.name,
     createdAt: timeline.startedAt,
     endedAt: timeline.endedAt ?? local.endedAt ?? null,
-    status: toDiaryStatus(timeline.status ?? local.status),
+    status,
+    editStatus: status === 'completed' ? 'COMPLETED' : 'DRAFT',
     visibility: timeline.visibility === 'public' ? 'public' : 'private',
     photos,
   };

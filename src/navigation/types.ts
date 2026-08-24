@@ -59,6 +59,8 @@ export type RootStackParamList = {
     diaryId: string;
     placeId?: string;
     mode?: 'edit' | 'view';
+    /** 게시 후 소유자 재편집 → 완료 시 재게시 */
+    republish?: boolean;
     liked?: boolean;
     likeCount?: number;
     commentCount?: number;

@@ -20,6 +20,7 @@ type DraggablePhotoProps = {
   layer: DecorPhotoLayer;
   uri: string;
   selected: boolean;
+  layoutUnit?: number;
   layoutRef: MutableRefObject<{ width: number; height: number }>;
   onSelect: () => void;
   onMove: (x: number, y: number) => void;
@@ -64,21 +65,29 @@ export const PHOTO_LAYER_BASE_H = 190;
 const BASE_W = PHOTO_LAYER_BASE_W;
 const BASE_H = PHOTO_LAYER_BASE_H;
 
-function mediaOffsetForCrop(cropRect?: PhotoCropRect | null) {
+function mediaOffsetForCrop(
+  cropRect: PhotoCropRect | null | undefined,
+  baseW: number,
+  baseH: number,
+) {
   const crop = normalizeCropRect(cropRect);
   return {
-    width: BASE_W,
-    height: BASE_H,
-    left: -crop.x * BASE_W,
-    top: -crop.y * BASE_H,
+    width: baseW,
+    height: baseH,
+    left: -crop.x * baseW,
+    top: -crop.y * baseH,
   };
 }
 
-function frameSizeForCrop(cropRect?: PhotoCropRect | null) {
+function frameSizeForCrop(
+  cropRect: PhotoCropRect | null | undefined,
+  baseW: number,
+  baseH: number,
+) {
   const crop = normalizeCropRect(cropRect);
   return {
-    width: Math.max(24, BASE_W * crop.width),
-    height: Math.max(24, BASE_H * crop.height),
+    width: Math.max(24 * (baseW / BASE_W), baseW * crop.width),
+    height: Math.max(24 * (baseH / BASE_H), baseH * crop.height),
   };
 }
 
@@ -86,6 +95,7 @@ export function DraggablePhoto({
   layer,
   uri,
   selected,
+  layoutUnit = 1,
   layoutRef,
   onSelect,
   onMove,
@@ -202,8 +212,12 @@ export function DraggablePhoto({
     }),
   ).current;
 
-  const frameSize = frameSizeForCrop(layer.cropRect);
-  const mediaOffset = mediaOffsetForCrop(layer.cropRect);
+  const unit = layoutUnit;
+  const baseW = BASE_W * unit;
+  const baseH = BASE_H * unit;
+  const frameSize = frameSizeForCrop(layer.cropRect, baseW, baseH);
+  const mediaOffset = mediaOffsetForCrop(layer.cropRect, baseW, baseH);
+  const borderWidth = Math.max(1, 2 * unit);
 
   return (
     <View
@@ -222,7 +236,7 @@ export function DraggablePhoto({
         },
       ]}
     >
-      <View style={[styles.frame, selected && styles.frameSelected]}>
+      <View style={[styles.frame, { borderWidth }, selected && styles.frameSelected]}>
         <View style={styles.mediaClip}>
           <Image
             source={{ uri }}
@@ -244,7 +258,6 @@ const styles = StyleSheet.create({
     borderRadius: 4,
     overflow: 'hidden',
     backgroundColor: '#E8E8E8',
-    borderWidth: 2,
     borderColor: 'transparent',
   },
   frameSelected: {

@@ -17,6 +17,7 @@ type DraggableTextProps = {
   layer: DecorTextLayer;
   selected: boolean;
   editable?: boolean;
+  layoutUnit?: number;
   layoutRef: MutableRefObject<{ width: number; height: number }>;
   onSelect: () => void;
   onMove: (x: number, y: number) => void;
@@ -61,6 +62,7 @@ export function DraggableText({
   layer,
   selected,
   editable = true,
+  layoutUnit = 1,
   layoutRef,
   onSelect,
   onMove,
@@ -199,6 +201,7 @@ export function DraggableText({
   ).current;
 
   const label = layer.content.trim() || '텍스트';
+  const unit = layoutUnit;
 
   return (
     <View
@@ -220,12 +223,27 @@ export function DraggableText({
         },
       ]}
     >
-      <View style={[styles.visual, selected && editable ? styles.selected : null]}>
+      <View
+        style={[
+          styles.visual,
+          {
+            paddingHorizontal: 10 * unit,
+            paddingVertical: 6 * unit,
+            borderRadius: 8 * unit,
+            maxWidth: 280 * unit,
+          },
+          selected && editable ? styles.selected : null,
+        ]}
+      >
         <Text
           style={[
             styles.text,
             getDecorFontStyle(layer.fontId),
-            { color: layer.color },
+            {
+              color: layer.color,
+              fontSize: 22 * unit,
+              lineHeight: 30 * unit,
+            },
           ]}
         >
           {label}
@@ -242,10 +260,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   visual: {
-    paddingHorizontal: 10,
-    paddingVertical: 6,
     borderRadius: 8,
-    maxWidth: 280,
   },
   selected: {
     borderWidth: 1,
@@ -253,8 +268,6 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(255,255,255,0.12)',
   },
   text: {
-    fontSize: 22,
-    lineHeight: 30,
     textAlign: 'center',
   },
 });

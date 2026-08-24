@@ -132,12 +132,23 @@ export async function getMedia(
   return record;
 }
 
+const MEDIA_URI_CACHE_TTL_MS = 5 * 60_000;
+const mediaUriCache = new Map<string, { uri: string | null; fetchedAt: number }>();
+
 export async function getMediaDisplayUri(
   accessToken: string,
   mediaId: string,
 ): Promise<string | null> {
+  const cacheKey = mediaId;
+  const cached = mediaUriCache.get(cacheKey);
+  if (cached && Date.now() - cached.fetchedAt < MEDIA_URI_CACHE_TTL_MS) {
+    return cached.uri;
+  }
+
   const payload = await getMedia(accessToken, mediaId);
-  return readStatus(payload) === 'ready' ? readMediaUri(payload) : null;
+  const uri = readStatus(payload) === 'ready' ? readMediaUri(payload) : null;
+  mediaUriCache.set(cacheKey, { uri, fetchedAt: Date.now() });
+  return uri;
 }
 
 export async function waitForMediaReady(

@@ -2,7 +2,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { CompositeScreenProps, useFocusEffect } from '@react-navigation/native';
 import { BottomTabScreenProps } from '@react-navigation/bottom-tabs';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
-import { useCallback, useMemo, useState } from 'react';
+import { useCallback, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
@@ -18,11 +18,9 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { getPublicFeed } from '../../api/feed';
-import { getMediaDisplayUri } from '../../api/media';
-import { getPublicTrip } from '../../api/publicTrips';
 import { listSavedPlaces, unsavePlace } from '../../api/saves';
 import { loadTokens } from '../../api/tokenStorage';
-import { ApiError, SavedPlaceItemDto } from '../../api/types';
+import { ApiError, FeedItemDto, SavedPlaceItemDto } from '../../api/types';
 import { MyPageHeartIcon, MyPageSettingsIcon } from '../../components/mypage/MyPageIcons';
 import { ProfileAvatar } from '../../components/mypage/ProfileAvatar';
 import { CoverThumb } from '../../components/diary/CoverThumb';
@@ -35,8 +33,10 @@ import {
   coverFromStickerLayout,
   feedCardToDiaryStub,
   feedItemToCard,
+  mergeFeedCardMedia,
   type FeedDiaryCard,
 } from '../../utils/feedMapper';
+import { enrichFeedCardsFromPublicTrips } from '../../utils/feedEnrichment';
 import { isDiaryPublished } from '../../utils/tripStatus';
 import { colors, radii, spacing, typography } from '../../theme';
 
@@ -59,7 +59,8 @@ const SEGMENTS: { id: LibrarySegment; label: string }[] = [
 
 export function MyPageScreen({ navigation }: Props) {
   const { user } = useAuth();
-  const { diaries, deleteDiary, updateDiaryVisibility, openPublicDiary } = useDiaries();
+  const { diaries, deleteDiary, updateDiaryVisibility, openPublicDiary, reopenDiaryForEdit } =
+    useDiaries();
 
   const username = user?.username ?? 'traveler';
   const bio = user?.bio ?? '매주 새로운 곳을 기록하는 다이어리 ✈️';
@@ -73,6 +74,8 @@ export function MyPageScreen({ navigation }: Props) {
   const [savedLoading, setSavedLoading] = useState(false);
   const [savedBusyId, setSavedBusyId] = useState<string | null>(null);
   const [openingLikedId, setOpeningLikedId] = useState<string | null>(null);
+  const [editBusy, setEditBusy] = useState(false);
+  const likedRequestRef = useRef(0);
 
   const coverDiaries = useMemo(
     () =>
@@ -87,6 +90,8 @@ export function MyPageScreen({ navigation }: Props) {
   );
 
   const loadLiked = useCallback(async () => {
+    const requestId = likedRequestRef.current + 1;
+    likedRequestRef.current = requestId;
     setLikedLoading(true);
     try {
       const tokens = await loadTokens();
@@ -95,61 +100,53 @@ export function MyPageScreen({ navigation }: Props) {
         return;
       }
 
-      const liked: FeedDiaryCard[] = [];
+      const likedItems: FeedItemDto[] = [];
       let page = 1;
       let hasMore = true;
 
-      while (hasMore && liked.length < 40 && page <= 4) {
+      while (hasMore && likedItems.length < 40 && page <= 4) {
         const feed = await getPublicFeed(tokens.access, {
           page,
           limit: 50,
           sort: 'recent',
         });
-        const likedItems = (feed.items ?? []).filter((item) => item.liked);
+        if (likedRequestRef.current !== requestId) return;
 
-        const cards = await Promise.all(
-          likedItems.map(async (item) => {
-            let coverThumbUrl: string | null = null;
-            let cover = coverFromStickerLayout(
-              item.title?.trim() || '여행 다이어리',
-              null,
-              null,
-            );
-
-            try {
-              const detail = await getPublicTrip(item.id);
-              cover = coverFromStickerLayout(
-                detail.title?.trim() || item.title?.trim() || '여행 다이어리',
-                detail.coverTitleFont,
-                detail.coverStickerLayout,
-              );
-              coverThumbUrl = detail.coverUrl?.trim() || null;
-            } catch {
-              // 공개 상세 실패 시 썸네일만
-            }
-
-            if (!coverThumbUrl && item.coverMediaId) {
-              try {
-                coverThumbUrl = await getMediaDisplayUri(tokens.access, item.coverMediaId);
-              } catch {
-                coverThumbUrl = null;
-              }
-            }
-
-            return feedItemToCard(item, coverThumbUrl, { cover, photos: [] });
-          }),
-        );
-
-        liked.push(...cards);
+        likedItems.push(...(feed.items ?? []).filter((item) => item.liked));
         hasMore = Boolean(feed.hasMore);
         page += 1;
       }
 
-      setLikedCards(liked);
-    } catch {
-      setLikedCards([]);
-    } finally {
+      const stubs = likedItems.map((item) =>
+        feedItemToCard(item, null, {
+          cover: coverFromStickerLayout(item.title?.trim() || '여행 다이어리', null, null),
+          photos: [],
+        }),
+      );
+
+      setLikedCards((prev) => {
+        const prevById = new Map(prev.map((card) => [card.id, card]));
+        return stubs.map((card) => mergeFeedCardMedia(card, prevById.get(card.id)));
+      });
       setLikedLoading(false);
+
+      await enrichFeedCardsFromPublicTrips(likedItems, tokens.access, {
+        concurrency: 3,
+        priorityIds: likedItems.slice(0, 6).map((item) => item.id),
+        isCancelled: () => likedRequestRef.current !== requestId,
+        onCardEnriched: (enriched) => {
+          setLikedCards((prev) =>
+            prev.map((card) =>
+              card.id === enriched.id ? mergeFeedCardMedia(enriched, card) : card,
+            ),
+          );
+        },
+      });
+    } catch {
+      if (likedRequestRef.current === requestId) {
+        setLikedCards([]);
+        setLikedLoading(false);
+      }
     }
   }, []);
 
@@ -181,16 +178,43 @@ export function MyPageScreen({ navigation }: Props) {
   );
 
   const openDiary = (diary: Diary) => {
-    if (isDiaryPublished(diary)) {
-      navigation.navigate('DiaryEdit', { diaryId: diary.id, mode: 'view' });
-      return;
-    }
-    const isDraft = Boolean(diary.coverDraft) && !diary.cover;
-    if (isDraft) {
+    // 표지만 임시저장인 경우 → 표지 편집으로
+    const isDraftCover = Boolean(diary.coverDraft) && !diary.cover && !isDiaryPublished(diary);
+    if (isDraftCover) {
       navigation.navigate('DiaryCoverEdit', { diaryId: diary.id });
       return;
     }
-    navigation.navigate('DiaryEdit', { diaryId: diary.id, mode: 'edit' });
+    // 라이브러리 카드 탭 = 게시물 보기. 꾸미기 재진입은 메뉴 「수정」만.
+    navigation.navigate({
+      name: 'DiaryEdit',
+      params: {
+        diaryId: diary.id,
+        mode: 'view',
+        republish: false,
+      },
+      merge: false,
+    });
+  };
+
+  const editDiary = async (diary: Diary) => {
+    if (editBusy) return;
+    setEditBusy(true);
+    try {
+      const wasPublished = isDiaryPublished(diary);
+      const ok = await reopenDiaryForEdit(diary.id);
+      if (!ok) return;
+      navigation.navigate({
+        name: 'DiaryEdit',
+        params: {
+          diaryId: diary.id,
+          mode: 'edit',
+          republish: wasPublished,
+        },
+        merge: false,
+      });
+    } finally {
+      setEditBusy(false);
+    }
   };
 
   const openLikedCard = async (card: FeedDiaryCard) => {
@@ -573,14 +597,18 @@ export function MyPageScreen({ navigation }: Props) {
 
             <Pressable
               accessibilityRole="button"
+              disabled={editBusy}
               onPress={() => {
                 const target = menuDiary;
                 setMenuDiary(null);
                 if (target) {
-                  openDiary(target);
+                  void editDiary(target);
                 }
               }}
-              style={({ pressed }) => [styles.menuItem, pressed && styles.pressed]}
+              style={({ pressed }) => [
+                styles.menuItem,
+                (pressed || editBusy) && styles.pressed,
+              ]}
             >
               <Ionicons name="create-outline" size={18} color={colors.ink} />
               <Text style={styles.menuItemText}>수정</Text>
@@ -714,7 +742,7 @@ const styles = StyleSheet.create({
   },
   thumb: {
     width: '100%',
-    height: CARD_WIDTH * 1.25,
+    height: CARD_WIDTH * (4 / 3),
     borderRadius: 12,
     backgroundColor: '#F3F4F6',
     overflow: 'hidden',

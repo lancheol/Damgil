@@ -5,6 +5,8 @@ import type {
   DiaryPlaceSelection,
   PlacePageDecoration,
 } from '../types/diary';
+import { isDecorFontId } from './decorAssets';
+import { findPhotoByMediaRef } from './diaryPhotos';
 import { buildDiaryTimeline } from './diaryTimeline';
 
 const OBJECT_PREFIX = 'place:';
@@ -34,13 +36,7 @@ function parseObjectId(
 }
 
 function toFontId(value: string | undefined): DecorFontId {
-  return value === 'serif' ||
-    value === 'mono' ||
-    value === 'rounded' ||
-    value === 'hand' ||
-    value === 'display'
-    ? value
-    : 'sans';
+  return isDecorFontId(value) ? value : 'sans';
 }
 
 function placesForDay(diary: Diary, dayNumber: number): DiaryPlaceSelection[] {
@@ -145,7 +141,7 @@ export function applyEditorDaysToDiary(
     for (const { object, parsed } of objects) {
       if (!parsed) continue;
       if (parsed.type === 'photo' && object.objectType === 'IMAGE' && object.mediaId) {
-        const photo = diary.photos.find((item) => item.mediaId === object.mediaId);
+        const photo = findPhotoByMediaRef(diary.photos, object.mediaId);
         if (!photo) continue;
         decoration.photos.push({
           id: parsed.id,

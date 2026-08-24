@@ -47,20 +47,23 @@ import {
   SavePlacePageDecorationInput,
 } from '../types/diary';
 import { normalizeCover } from '../utils/diaryCover';
+import { refreshDiaryCoverPhotoUris } from '../utils/diaryCoverMedia';
 import { buildPlaceSelections } from '../utils/diaryPlaces';
+import { isDiaryPublished, toDiaryStatus } from '../utils/tripStatus';
 import { buildPlacePageDecoration, normalizePlacePageDecoration } from '../utils/diaryPageDecoration';
+import { mergeDiaryPhotosPreservingUris } from '../utils/diaryPhotos';
 import { buildPhotoDecoration, resolveDecorationTexts } from '../utils/diaryTextLayers';
 import { resolveRegionIdsFromPlace } from '../utils/tripRegions';
 import { mergeTripsWithLocal } from '../utils/tripMapper';
 import { applyTimelineToDiary } from '../utils/tripItemMapper';
 import { photoDecorationFromItemDto } from '../utils/tripItemDecoration';
-import { toDiaryStatus } from '../utils/tripStatus';
 import {
   applyEditorDaysToDiary,
   buildEditorStateForDay,
   dayNumberForPlace,
 } from '../utils/tripEditorMapper';
 import { publicTripToDiary } from '../utils/feedMapper';
+import { resolvePublicTripMedia } from '../utils/publicTripMedia';
 
 const DIARIES_STORAGE_KEY = '@damgil/diaries/v1';
 
@@ -77,6 +80,8 @@ type DiaryContextValue = {
     diaryId: string,
     visibility?: 'public' | 'private',
   ) => Promise<boolean>;
+  /** 게시된 다이어리를 소유자 꾸미기 모드로 되돌림 (status → editing) */
+  reopenDiaryForEdit: (diaryId: string) => Promise<boolean>;
   saveDiaryCover: (input: SaveDiaryCoverInput) => Promise<boolean>;
   updateDiaryVisibility: (
     diaryId: string,
@@ -142,6 +147,7 @@ function normalizeDiary(diary: Diary): Diary {
             ? normalizePlacePageDecoration(
                 selection.pageDecoration,
                 selection.representativePhotoId,
+                selection.photoIds,
               )
             : null,
         }))
@@ -179,6 +185,10 @@ export function DiaryProvider({ children }: PropsWithChildren) {
   const { isAuthenticated, isReady: authReady } = useAuth();
   const [diaries, setDiaries] = useState<Diary[]>([]);
   const [guestDiaries, setGuestDiaries] = useState<Diary[]>([]);
+  const guestDiariesRef = useRef<Diary[]>([]);
+  const guestDiaryFreshAtRef = useRef(new Map<string, number>());
+  const GUEST_DIARY_FRESH_MS = 30_000;
+  guestDiariesRef.current = guestDiaries;
   const [isReady, setIsReady] = useState(false);
   const hasMutatedRef = useRef(false);
   const editorRevisionsRef = useRef(new Map<string, number>());
@@ -614,22 +624,6 @@ export function DiaryProvider({ children }: PropsWithChildren) {
       if (!target) {
         return false;
       }
-      if (toDiaryStatus(target.status) === 'completed') {
-        hasMutatedRef.current = true;
-        setDiaries((prev) =>
-          prev.map((diary) =>
-            diary.id === diaryId
-              ? {
-                  ...diary,
-                  status: 'completed',
-                  editStatus: 'COMPLETED',
-                  visibility: diary.visibility ?? visibility,
-                }
-              : diary,
-          ),
-        );
-        return true;
-      }
 
       const tokens = await loadTokens();
       if (!tokens?.access) {
@@ -659,6 +653,59 @@ export function DiaryProvider({ children }: PropsWithChildren) {
         const message =
           error instanceof ApiError ? error.message : '다이어리를 게시하지 못했어요.';
         Alert.alert('게시 실패', message);
+        return false;
+      }
+    },
+    [diaries],
+  );
+
+  const reopenDiaryForEdit = useCallback(
+    async (diaryId: string) => {
+      const target = diaries.find((diary) => diary.id === diaryId);
+      if (!target) {
+        return false;
+      }
+      if (!isDiaryPublished(target)) {
+        return true;
+      }
+
+      const tokens = await loadTokens();
+      if (!tokens?.access) {
+        Alert.alert('수정 실패', '로그인이 필요합니다.');
+        return false;
+      }
+
+      try {
+        const trip = await changeTripStatus(tokens.access, diaryId, {
+          status: 'editing',
+        });
+        const nextStatus = toDiaryStatus(trip.status);
+        if (nextStatus === 'completed') {
+          Alert.alert('수정 불가', '완료된 다이어리는 서버에서 다시 편집할 수 없어요.');
+          return false;
+        }
+
+        hasMutatedRef.current = true;
+        setDiaries((prev) =>
+          prev.map((diary) =>
+            diary.id === diaryId
+              ? {
+                  ...diary,
+                  status: nextStatus,
+                  editStatus: 'DRAFT',
+                  visibility: trip.visibility === 'public' ? 'public' : 'private',
+                  endedAt: trip.endedAt ?? diary.endedAt ?? null,
+                }
+              : diary,
+          ),
+        );
+        return true;
+      } catch (error) {
+        const message =
+          error instanceof ApiError
+            ? error.message
+            : '다이어리를 수정 모드로 바꾸지 못했어요.';
+        Alert.alert('수정 실패', message);
         return false;
       }
     },
@@ -1117,9 +1164,32 @@ export function DiaryProvider({ children }: PropsWithChildren) {
   const getDiaryById = useCallback(
     (diaryId: string) =>
       diaries.find((diary) => diary.id === diaryId) ??
-      guestDiaries.find((diary) => diary.id === diaryId),
+      guestDiaries.find((diary) => diary.id === diaryId) ??
+      guestDiariesRef.current.find((diary) => diary.id === diaryId),
     [diaries, guestDiaries],
   );
+
+  const resolvePublicTripMediaForDetail = useCallback(
+    async (detail: Awaited<ReturnType<typeof getPublicTrip>>) => {
+      const tokens = await loadTokens();
+      const media = await resolvePublicTripMedia(detail, tokens?.access ?? null);
+      return {
+        ...media,
+        accessToken: tokens?.access ?? null,
+      };
+    },
+    [],
+  );
+
+  const mergeGuestDiarySnapshot = useCallback((prev: Diary | undefined, mapped: Diary): Diary => {
+    if (!prev) return mapped;
+    return normalizeDiary({
+      ...mapped,
+      photos: mergeDiaryPhotosPreservingUris(prev.photos ?? [], mapped.photos ?? []),
+      cover: mapped.cover ?? prev.cover,
+      coverThumbUrl: mapped.coverThumbUrl ?? prev.coverThumbUrl,
+    });
+  }, []);
 
   const openPublicDiary = useCallback(async (tripId: string): Promise<OpenPublicDiaryResult> => {
     const owned = diaries.find((diary) => diary.id === tripId);
@@ -1129,25 +1199,31 @@ export function DiaryProvider({ children }: PropsWithChildren) {
 
     try {
       const detail = await getPublicTrip(tripId);
-      const tokens = await loadTokens();
-      const mediaEntries = await Promise.all(
-        (detail.items ?? []).map(async (item) => {
-          if (!item.mediaId || !tokens?.access) return [item.id, null] as const;
-          try {
-            return [item.id, await getMediaDisplayUri(tokens.access, item.mediaId)] as const;
-          } catch {
-            return [item.id, null] as const;
-          }
-        }),
+      const media = await resolvePublicTripMediaForDetail(detail);
+      let mapped = normalizeDiary(
+        publicTripToDiary(detail, media.itemUris, media.coverUris),
       );
-      const mapped = normalizeDiary(
-        publicTripToDiary(detail, Object.fromEntries(mediaEntries)),
-      );
+
+      if (media.accessToken) {
+        try {
+          const remote = await getTripEditorState(media.accessToken, tripId);
+          mapped = normalizeDiary(applyEditorDaysToDiary(mapped, remote.days));
+        } catch {
+          // 타인의 editor는 막혀 있을 수 있음 — 기본 배치로 표시
+        }
+      }
+
+      const existing = guestDiariesRef.current.find((diary) => diary.id === mapped.id);
+      const merged = mergeGuestDiarySnapshot(existing, mapped);
+
       setGuestDiaries((prev) => {
-        const without = prev.filter((diary) => diary.id !== mapped.id);
-        return [mapped, ...without].slice(0, 20);
+        const without = prev.filter((diary) => diary.id !== merged.id);
+        const next = [merged, ...without].slice(0, 20);
+        guestDiariesRef.current = next;
+        return next;
       });
-      return { status: 'ok', diary: mapped };
+      guestDiaryFreshAtRef.current.set(tripId, Date.now());
+      return { status: 'ok', diary: merged };
     } catch (error) {
       if (error instanceof ApiError && (error.status === 404 || error.status === 403)) {
         setGuestDiaries((prev) => prev.filter((diary) => diary.id !== tripId));
@@ -1159,30 +1235,42 @@ export function DiaryProvider({ children }: PropsWithChildren) {
       Alert.alert('불러오기 실패', message);
       return { status: 'error' };
     }
-  }, [diaries]);
+  }, [diaries, resolvePublicTripMediaForDetail, mergeGuestDiarySnapshot]);
 
   const syncDiaryTimeline = useCallback(async (diaryId: string) => {
-    const isGuest = guestDiaries.some((diary) => diary.id === diaryId);
+    const isGuest =
+      guestDiaries.some((diary) => diary.id === diaryId) ||
+      guestDiariesRef.current.some((diary) => diary.id === diaryId);
     if (isGuest) {
+      const freshAt = guestDiaryFreshAtRef.current.get(diaryId);
+      if (freshAt != null && Date.now() - freshAt < GUEST_DIARY_FRESH_MS) {
+        return true;
+      }
+
       try {
         const detail = await getPublicTrip(diaryId);
-        const tokens = await loadTokens();
-        const mediaEntries = await Promise.all(
-          (detail.items ?? []).map(async (item) => {
-            if (!item.mediaId || !tokens?.access) return [item.id, null] as const;
-            try {
-              return [item.id, await getMediaDisplayUri(tokens.access, item.mediaId)] as const;
-            } catch {
-              return [item.id, null] as const;
-            }
-          }),
+        const media = await resolvePublicTripMediaForDetail(detail);
+        let mapped = normalizeDiary(
+          publicTripToDiary(detail, media.itemUris, media.coverUris),
         );
-        const mapped = normalizeDiary(
-          publicTripToDiary(detail, Object.fromEntries(mediaEntries)),
-        );
-        setGuestDiaries((prev) =>
-          prev.map((diary) => (diary.id === diaryId ? mapped : diary)),
-        );
+        if (media.accessToken) {
+          try {
+            const remote = await getTripEditorState(media.accessToken, diaryId);
+            mapped = normalizeDiary(applyEditorDaysToDiary(mapped, remote.days));
+          } catch {
+            // ignore
+          }
+        }
+        setGuestDiaries((prev) => {
+          const existing = prev.find((diary) => diary.id === diaryId);
+          const merged = mergeGuestDiarySnapshot(existing, mapped);
+          const next = prev.some((diary) => diary.id === diaryId)
+            ? prev.map((diary) => (diary.id === diaryId ? merged : diary))
+            : [merged, ...prev].slice(0, 20);
+          guestDiariesRef.current = next;
+          return next;
+        });
+        guestDiaryFreshAtRef.current.set(diaryId, Date.now());
         return true;
       } catch {
         return false;
@@ -1210,25 +1298,49 @@ export function DiaryProvider({ children }: PropsWithChildren) {
         }),
       );
       const mediaUrisByItemId = Object.fromEntries(mediaEntries);
-      hasMutatedRef.current = true;
+      let withTimeline: Diary | null = null;
       setDiaries((prev) => {
         const local = prev.find((diary) => diary.id === diaryId);
         if (!local) {
           return prev;
         }
         const updated = applyTimelineToDiary(timeline, local, mediaUrisByItemId);
-        return prev.map((diary) => (diary.id === diaryId ? normalizeDiary(updated) : diary));
+        withTimeline = updated;
+        hasMutatedRef.current = true;
+        return prev.map((diary) =>
+          diary.id === diaryId ? normalizeDiary(updated) : diary,
+        );
       });
+
+      if (withTimeline) {
+        const syncedDiary: Diary = withTimeline;
+        const refreshedPhotos = await refreshDiaryCoverPhotoUris(syncedDiary, tokens.access);
+        if (refreshedPhotos !== syncedDiary.photos) {
+          hasMutatedRef.current = true;
+          const nextDiary = { ...syncedDiary, photos: refreshedPhotos };
+          setDiaries((prev) =>
+            prev.map((diary) =>
+              diary.id === diaryId ? normalizeDiary(nextDiary) : diary,
+            ),
+          );
+        }
+      }
       return true;
     } catch {
       return false;
     }
-  }, [guestDiaries]);
+  }, [resolvePublicTripMediaForDetail, mergeGuestDiarySnapshot]);
 
   const syncDiaryEditor = useCallback(async (diaryId: string) => {
     if (!/^\d+$/.test(diaryId)) return true;
-    if (guestDiaries.some((diary) => diary.id === diaryId)) {
-      return true;
+    const isGuest =
+      guestDiaries.some((diary) => diary.id === diaryId) ||
+      guestDiariesRef.current.some((diary) => diary.id === diaryId);
+    if (isGuest) {
+      const freshAt = guestDiaryFreshAtRef.current.get(diaryId);
+      if (freshAt != null && Date.now() - freshAt < GUEST_DIARY_FRESH_MS) {
+        return true;
+      }
     }
     const tokens = await loadTokens();
     if (!tokens?.access) return false;
@@ -1238,14 +1350,38 @@ export function DiaryProvider({ children }: PropsWithChildren) {
       remote.days.forEach((day) => {
         editorRevisionsRef.current.set(`${diaryId}:${day.dayNumber}`, day.revision);
       });
+      const nextEditStatus = remote.editStatus === 'COMPLETED' ? 'COMPLETED' : 'DRAFT';
+      const apply = (diary: Diary): Diary => ({
+        ...applyEditorDaysToDiary(diary, remote.days),
+        editStatus: isGuest ? 'COMPLETED' : nextEditStatus,
+        status: isGuest
+          ? 'completed'
+          : nextEditStatus === 'COMPLETED'
+            ? 'completed'
+            : toDiaryStatus(diary.status) === 'completed'
+              ? 'editing'
+              : toDiaryStatus(diary.status),
+      });
+
+      if (isGuest) {
+        setGuestDiaries((prev) => {
+          const next = prev.map((diary) =>
+            diary.id === diaryId ? normalizeDiary(apply(diary)) : diary,
+          );
+          guestDiariesRef.current = next;
+          return next;
+        });
+        return true;
+      }
+
       setDiaries((prev) =>
         prev.map((diary) =>
-          diary.id === diaryId ? applyEditorDaysToDiary(diary, remote.days) : diary,
+          diary.id === diaryId ? normalizeDiary(apply(diary)) : diary,
         ),
       );
       return true;
     } catch {
-      return false;
+      return isGuest;
     }
   }, [guestDiaries]);
 
@@ -1262,6 +1398,7 @@ export function DiaryProvider({ children }: PropsWithChildren) {
       removePhotosFromDiary,
       endDiary,
       completeDiary,
+      reopenDiaryForEdit,
       saveDiaryCover,
       updateDiaryVisibility,
       discardCoverDraft,
@@ -1284,6 +1421,7 @@ export function DiaryProvider({ children }: PropsWithChildren) {
       removePhotosFromDiary,
       endDiary,
       completeDiary,
+      reopenDiaryForEdit,
       saveDiaryCover,
       updateDiaryVisibility,
       discardCoverDraft,

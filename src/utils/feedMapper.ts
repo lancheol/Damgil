@@ -1,5 +1,8 @@
 import type { FeedItemDto, PublicTripDetailDto } from '../api/types';
 import type { Diary, DiaryCover, DiaryPhoto } from '../types/diary';
+import { isDecorFontId } from './decorAssets';
+import { buildPlaceSelections } from './diaryPlaces';
+import { mediaKeyFromPhotoId } from './diaryPhotos';
 import { applyTimelineToDiary } from './tripItemMapper';
 import { toDiaryStatus } from './tripStatus';
 
@@ -31,14 +34,7 @@ export function coverFromStickerLayout(
   return {
     coverPhotoId: typeof layout?.coverPhotoId === 'string' ? layout.coverPhotoId : null,
     title: (typeof layout?.title === 'string' && layout.title.trim()) || title,
-    fontId:
-      font === 'serif' ||
-      font === 'mono' ||
-      font === 'rounded' ||
-      font === 'hand' ||
-      font === 'display'
-        ? font
-        : 'sans',
+    fontId: isDecorFontId(font) ? font : 'sans',
     titleX: typeof layout?.titleX === 'number' ? layout.titleX : 0.5,
     titleY: typeof layout?.titleY === 'number' ? layout.titleY : 0.5,
     titleScale: typeof layout?.titleScale === 'number' ? layout.titleScale : 1,
@@ -106,11 +102,48 @@ export function feedCardToDiaryStub(card: FeedDiaryCard): Diary {
   };
 }
 
+/** 피드 재로드 시 URI가 더 많이 채워진 쪽의 표지·사진 데이터를 유지한다. */
+export function mergeFeedCardMedia(
+  next: FeedDiaryCard,
+  prev: FeedDiaryCard | undefined,
+): FeedDiaryCard {
+  if (!prev) return next;
+
+  const countResolved = (photos: DiaryPhoto[]) =>
+    photos.filter((photo) => Boolean(photo.uri?.trim())).length;
+
+  const prevResolved = countResolved(prev.photos);
+  const nextResolved = countResolved(next.photos);
+  const prevHasLayout = Boolean(
+    prev.cover?.photos?.length ||
+      prev.cover?.stickers?.length ||
+      prev.cover?.texts?.length,
+  );
+  const nextHasLayout = Boolean(
+    next.cover?.photos?.length ||
+      next.cover?.stickers?.length ||
+      next.cover?.texts?.length,
+  );
+
+  if (nextResolved >= prevResolved && (!prevHasLayout || nextHasLayout)) {
+    return next;
+  }
+
+  return {
+    ...next,
+    cover: prev.cover ?? next.cover,
+    photos: prevResolved > nextResolved ? prev.photos : next.photos,
+    coverThumbUrl: next.coverThumbUrl ?? prev.coverThumbUrl,
+  };
+}
+
 export function publicTripToDiary(
   trip: PublicTripDetailDto,
   mediaUrisByItemId: Record<string, string | null> = {},
+  coverMediaUris: Record<string, string | null> = {},
 ): Diary {
   const title = trip.title?.trim() || '여행 다이어리';
+  const cover = coverFromStickerLayout(title, trip.coverTitleFont, trip.coverStickerLayout);
   const base: Diary = {
     id: trip.id,
     name: title,
@@ -123,14 +156,14 @@ export function publicTripToDiary(
     commentCount: trip.commentCount ?? 0,
     coverThumbUrl: trip.coverUrl ?? null,
     photos: [],
-    cover: coverFromStickerLayout(title, trip.coverTitleFont, trip.coverStickerLayout),
+    cover,
     coverDraft: null,
     visibility: trip.visibility === 'public' ? 'public' : 'private',
     placesSetupAt: null,
     placeSelections: null,
   };
 
-  return applyTimelineToDiary(
+  const withItems = applyTimelineToDiary(
     {
       ...trip,
       items: trip.items ?? [],
@@ -139,4 +172,51 @@ export function publicTripToDiary(
     base,
     mediaUrisByItemId,
   );
+
+  const coverPhotoIds = new Set<string>();
+  if (cover?.coverPhotoId) coverPhotoIds.add(cover.coverPhotoId);
+  for (const layer of cover?.photos ?? []) {
+    if (layer.photoId) coverPhotoIds.add(layer.photoId);
+  }
+
+  const existing = new Set(withItems.photos.map((photo) => photo.id));
+  for (const photo of withItems.photos) {
+    if (photo.mediaId) existing.add(`media-${photo.mediaId}`);
+  }
+
+  const coverExtras: DiaryPhoto[] = [];
+  for (const photoId of coverPhotoIds) {
+    if (existing.has(photoId)) continue;
+    const mediaId = mediaKeyFromPhotoId(photoId);
+    const uri =
+      (mediaId ? coverMediaUris[mediaId] : null) ||
+      mediaUrisByItemId[photoId] ||
+      (mediaId && mediaId === String(trip.coverMediaId) ? trip.coverUrl : null) ||
+      coverMediaUris[photoId] ||
+      '';
+    coverExtras.push({
+      id: photoId,
+      uri: uri?.trim() || '',
+      mediaType: 'photo',
+      mediaId,
+      placeName: null,
+      note: '',
+      latitude: 0,
+      longitude: 0,
+      placeContentId: null,
+      createdAt: trip.publishedAt ?? trip.createdAt,
+      decoration: null,
+    });
+  }
+
+  const photos = [...withItems.photos, ...coverExtras];
+  // 타임라인/장소는 여행 기록만 — 표지 전용 media는 photoById용으로만 합침
+  const selections = buildPlaceSelections(withItems.photos);
+
+  return {
+    ...withItems,
+    photos,
+    placeSelections: selections.length > 0 ? selections : null,
+    placesSetupAt: selections.length > 0 ? new Date().toISOString() : null,
+  };
 }

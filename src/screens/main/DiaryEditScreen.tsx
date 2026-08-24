@@ -18,6 +18,7 @@ import * as ImagePicker from 'expo-image-picker';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { BackButton } from '../../components/common/BackButton';
+import { CoverCanvas } from '../../components/diary/CoverCanvas';
 import { DiaryCommentsSheet } from '../../components/diary/DiaryCommentsSheet';
 import { DiaryPageCanvas } from '../../components/diary/DiaryPageCanvas';
 import { DiarySocialDock } from '../../components/diary/DiarySocialDock';
@@ -34,7 +35,6 @@ import {
   DecorPhotoLayer,
   DecorSticker,
   DecorTextLayer,
-  DiaryPhoto,
   DiaryPlaceSelection,
 } from '../../types/diary';
 import {
@@ -49,13 +49,18 @@ import {
   createDefaultPhotoLayer,
   normalizePlacePageDecoration,
 } from '../../utils/diaryPageDecoration';
+import { indexPhotosById } from '../../utils/diaryPhotos';
 import {
   buildPlaceSelections,
   isPlacesSetupComplete,
 } from '../../utils/diaryPlaces';
 import { createTextLayer } from '../../utils/diaryTextLayers';
 import { buildDiaryTimeline } from '../../utils/diaryTimeline';
-import { getCoverBackgroundColor, getEffectiveCover } from '../../utils/diaryCover';
+import {
+  getCoverBackgroundColor,
+  getEffectiveCover,
+  resolveCoverTitleColor,
+} from '../../utils/diaryCover';
 import { isDiaryPublished } from '../../utils/tripStatus';
 import { colors, radii, spacing, typography } from '../../theme';
 
@@ -74,8 +79,10 @@ export function DiaryEditScreen({ navigation, route }: Props) {
   const { getDiaryById, savePlaceSelections, savePlacePageDecoration, addPhotoToDiary, syncDiaryTimeline, syncDiaryEditor, completeDiary, removePhotosFromDiary } =
     useDiaries();
   const diary = getDiaryById(diaryId);
+  const isRepublish = Boolean(route.params.republish);
   const readOnly =
-    route.params.mode === 'view' || isDiaryPublished(diary);
+    route.params.mode === 'view' ||
+    (route.params.mode !== 'edit' && isDiaryPublished(diary));
 
   const [liked, setLiked] = useState(Boolean(route.params.liked));
   const [likeCount, setLikeCount] = useState(
@@ -161,13 +168,16 @@ export function DiaryEditScreen({ navigation, route }: Props) {
     () => (diary ? getCoverBackgroundColor(getEffectiveCover(diary)) : undefined),
     [diary],
   );
-  const photoById = useMemo(() => {
-    const map: Record<string, DiaryPhoto | undefined> = {};
-    for (const photo of diary?.photos ?? []) {
-      map[photo.id] = photo;
+  const photoById = useMemo(() => indexPhotosById(diary?.photos), [diary?.photos]);
+  const viewCover = useMemo(() => getEffectiveCover(diary), [diary]);
+  const [viewingCover, setViewingCover] = useState(false);
+
+  useEffect(() => {
+    // 읽기 모드에서는 표지 꾸미기를 먼저 보여 줌
+    if (readOnly) {
+      setViewingCover(true);
     }
-    return map;
-  }, [diary]);
+  }, [readOnly, diaryId]);
 
   const [activeDayKey, setActiveDayKey] = useState<string | null>(null);
   const [activePlaceId, setActivePlaceId] = useState<string | null>(null);
@@ -230,6 +240,7 @@ export function DiaryEditScreen({ navigation, route }: Props) {
   const deleteHitRef = useRef<HitRect>({ x: 0, y: 0, width: 0, height: 0 });
   const deleteChipRef = useRef<View>(null);
   const loadedPlaceIdRef = useRef<string | null>(null);
+  const loadedDecorationKeyRef = useRef<string | null>(null);
   const photosRef = useRef(photos);
   const stickersRef = useRef(stickers);
   const textsRef = useRef(texts);
@@ -312,15 +323,29 @@ export function DiaryEditScreen({ navigation, route }: Props) {
       setStickers([]);
       setTexts([]);
       loadedPlaceIdRef.current = null;
-      return;
-    }
-    if (loadedPlaceIdRef.current === activePlace.id) {
+      loadedDecorationKeyRef.current = null;
       return;
     }
     const saved =
       diary?.placeSelections?.find((place) => place.id === activePlace.id)?.pageDecoration ??
       activePlace.pageDecoration;
-    const next = normalizePlacePageDecoration(saved, activePlace.representativePhotoId);
+    const decorationKey = [
+      activePlace.id,
+      saved?.updatedAt ?? '',
+      activePlace.photoIds.join(','),
+      saved?.photos?.map((layer) => layer.photoId).join(',') ?? '',
+    ].join('|');
+    if (
+      loadedPlaceIdRef.current === activePlace.id &&
+      loadedDecorationKeyRef.current === decorationKey
+    ) {
+      return;
+    }
+    const next = normalizePlacePageDecoration(
+      saved,
+      activePlace.representativePhotoId,
+      activePlace.photoIds,
+    );
     setPhotos(next.photos);
     setStickers(next.stickers);
     setTexts(next.texts);
@@ -331,6 +356,7 @@ export function DiaryEditScreen({ navigation, route }: Props) {
     setDirty(false);
     setSheet('none');
     loadedPlaceIdRef.current = activePlace.id;
+    loadedDecorationKeyRef.current = decorationKey;
   }, [activePlace, diary?.placeSelections]);
 
   const selectPlace = async (placeId: string) => {
@@ -653,37 +679,51 @@ export function DiaryEditScreen({ navigation, route }: Props) {
       navigation.goBack();
       return;
     }
-    Alert.alert('다이어리 게시', '완료하면 게시물로 올라가요. 공개 범위를 선택해 주세요.', [
-      { text: '취소', style: 'cancel' },
-      {
-        text: '비공개로 게시',
-        onPress: () => {
-          void (async () => {
-            if (dirtyRef.current && !(await persistCurrent())) {
-              Alert.alert('저장 실패', '페이지를 저장하지 못했어요.');
-              return;
-            }
-            if (await completeDiary(diaryId, 'private')) {
-              navigation.goBack();
-            }
-          })();
+    Alert.alert(
+      isRepublish ? '수정 완료' : '다이어리 게시',
+      isRepublish
+        ? '완료하면 게시물에 반영돼요. 공개 범위를 선택해 주세요.'
+        : '완료하면 게시물로 올라가요. 공개 범위를 선택해 주세요.',
+      [
+        { text: '취소', style: 'cancel' },
+        {
+          text: isRepublish ? '비공개로 완료' : '비공개로 게시',
+          onPress: () => {
+            void (async () => {
+              if (dirtyRef.current && !(await persistCurrent())) {
+                Alert.alert('저장 실패', '페이지를 저장하지 못했어요.');
+                return;
+              }
+              if (await completeDiary(diaryId, 'private')) {
+                navigation.replace('DiaryEdit', {
+                  diaryId,
+                  mode: 'view',
+                  republish: false,
+                });
+              }
+            })();
+          },
         },
-      },
-      {
-        text: '공개로 게시',
-        onPress: () => {
-          void (async () => {
-            if (dirtyRef.current && !(await persistCurrent())) {
-              Alert.alert('저장 실패', '페이지를 저장하지 못했어요.');
-              return;
-            }
-            if (await completeDiary(diaryId, 'public')) {
-              navigation.goBack();
-            }
-          })();
+        {
+          text: isRepublish ? '공개로 완료' : '공개로 게시',
+          onPress: () => {
+            void (async () => {
+              if (dirtyRef.current && !(await persistCurrent())) {
+                Alert.alert('저장 실패', '페이지를 저장하지 못했어요.');
+                return;
+              }
+              if (await completeDiary(diaryId, 'public')) {
+                navigation.replace('DiaryEdit', {
+                  diaryId,
+                  mode: 'view',
+                  republish: false,
+                });
+              }
+            })();
+          },
         },
-      },
-    ]);
+      ],
+    );
   };
 
   const handleEditCover = () => {
@@ -828,7 +868,7 @@ export function DiaryEditScreen({ navigation, route }: Props) {
         )}
         {!readOnly ? (
           <Pressable onPress={handleDone} style={({ pressed }) => [styles.doneChip, pressed && styles.pressed]}>
-            <Text style={styles.doneChipText}>게시</Text>
+            <Text style={styles.doneChipText}>{isRepublish ? '완료' : '게시'}</Text>
           </Pressable>
         ) : null}
       </View>
@@ -841,12 +881,28 @@ export function DiaryEditScreen({ navigation, route }: Props) {
             contentContainerStyle={styles.indexTabs}
             style={styles.indexScroll}
           >
+            {readOnly ? (
+              <Pressable
+                onPress={() => setViewingCover(true)}
+                style={[styles.indexTab, viewingCover && styles.indexTabActive]}
+                accessibilityRole="button"
+                accessibilityState={{ selected: viewingCover }}
+                accessibilityLabel="표지"
+              >
+                <Text style={[styles.indexTabText, viewingCover && styles.indexTabTextActive]}>
+                  표지
+                </Text>
+              </Pressable>
+            ) : null}
             {timeline.map((group) => {
-              const selected = group.dateKey === activeDay?.dateKey;
+              const selected = !viewingCover && group.dateKey === activeDay?.dateKey;
               return (
                 <Pressable
                   key={group.dateKey}
-                  onPress={() => void selectDay(group.dateKey)}
+                  onPress={() => {
+                    setViewingCover(false);
+                    void selectDay(group.dateKey);
+                  }}
                   style={[styles.indexTab, selected && styles.indexTabActive]}
                   accessibilityRole="button"
                   accessibilityState={{ selected }}
@@ -871,6 +927,31 @@ export function DiaryEditScreen({ navigation, route }: Props) {
           >
             <View style={styles.pageWrap} pointerEvents={readOnly ? 'box-none' : 'auto'}>
               <View style={styles.pageCanvasHost} pointerEvents={readOnly ? 'none' : 'auto'}>
+              {readOnly && viewingCover ? (
+                <CoverCanvas
+                  style={styles.pageCanvas}
+                  fill
+                  editable={false}
+                  backgroundColor={getCoverBackgroundColor(viewCover)}
+                  title={viewCover.title?.trim() || diary.name}
+                  fontId={viewCover.fontId}
+                  titleX={viewCover.titleX}
+                  titleY={viewCover.titleY}
+                  titleScale={viewCover.titleScale}
+                  titleRotation={viewCover.titleRotation}
+                  titleColor={resolveCoverTitleColor(
+                    viewCover,
+                    getCoverBackgroundColor(viewCover),
+                  )}
+                  photos={viewCover.photos ?? []}
+                  photoById={photoById}
+                  stickers={viewCover.stickers ?? []}
+                  texts={viewCover.texts ?? []}
+                  selectedPhotoId={null}
+                  selectedStickerId={null}
+                  selectedTextId={null}
+                />
+              ) : (
               <DiaryPageCanvas
                 style={styles.pageCanvas}
                 photos={photos}
@@ -1034,6 +1115,7 @@ export function DiaryEditScreen({ navigation, route }: Props) {
                     : (id, pageX, pageY) => handleDragEnd('text', id, pageX, pageY)
                 }
               />
+              )}
               </View>
 
               {showTrash ? (
@@ -1048,6 +1130,7 @@ export function DiaryEditScreen({ navigation, route }: Props) {
                 </View>
               ) : null}
 
+              {!(readOnly && viewingCover) ? (
               <View style={styles.timeline}>
                 <Pressable
                   accessibilityRole="button"
@@ -1090,6 +1173,7 @@ export function DiaryEditScreen({ navigation, route }: Props) {
                   })}
                 </ScrollView>
               </View>
+              ) : null}
             </View>
           </HomeBookShell>
         </View>

@@ -1,4 +1,5 @@
 import { Ionicons } from '@expo/vector-icons';
+import { useFocusEffect } from '@react-navigation/native';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
@@ -32,7 +33,6 @@ import {
   DecorSticker,
   DecorTextLayer,
   DiaryCover,
-  DiaryPhoto,
 } from '../../types/diary';
 import {
   createStickerId,
@@ -46,6 +46,7 @@ import {
   uniqueColors,
 } from '../../utils/coverColorHistory';
 import { createDefaultPhotoLayer } from '../../utils/diaryPageDecoration';
+import { indexPhotosById } from '../../utils/diaryPhotos';
 import { createTextLayer } from '../../utils/diaryTextLayers';
 import {
   DEFAULT_COVER_COLOR,
@@ -140,18 +141,53 @@ export function DiaryCoverEditScreen({ navigation, route }: Props) {
   const dirtyRef = useRef(dirty);
   dirtyRef.current = dirty;
 
-  const photoById = useMemo(() => {
-    const map: Record<string, DiaryPhoto | undefined> = {};
-    for (const photo of diary?.photos ?? []) {
-      map[photo.id] = photo;
-    }
-    return map;
-  }, [diary]);
+  const photoById = useMemo(() => indexPhotosById(diary?.photos), [diary?.photos]);
 
   const markDirty = useCallback(() => {
     dirtyRef.current = true;
     setDirty(true);
   }, []);
+
+  const applyCoverState = useCallback(
+    (source: DiaryCover) => {
+      setTitle(source.title || diary?.name || '');
+      setFontId(source.fontId);
+      setTitleX(clampCoverTitleAxis(source.titleX, DEFAULT_COVER_TITLE_X));
+      setTitleY(clampCoverTitleAxis(source.titleY, DEFAULT_COVER_TITLE_Y));
+      setTitleScale(clampCoverTitleScale(source.titleScale ?? DEFAULT_COVER_TITLE_SCALE));
+      setTitleRotation(
+        clampCoverTitleRotation(source.titleRotation ?? DEFAULT_COVER_TITLE_ROTATION),
+      );
+      setTitleColor(source.titleColor?.trim() || undefined);
+      setBackgroundColor(getCoverBackgroundColor(source) || DEFAULT_COVER_COLOR);
+      setPhotos(Array.isArray(source.photos) ? source.photos : []);
+      setStickers(Array.isArray(source.stickers) ? source.stickers : []);
+      setTexts(Array.isArray(source.texts) ? source.texts : []);
+      setSelectedPhotoId(null);
+      setSelectedStickerId(null);
+      setSelectedTextId(null);
+      setSelectedTitle(false);
+      dirtyRef.current = false;
+      setDirty(false);
+    },
+    [diary?.name],
+  );
+
+  useFocusEffect(
+    useCallback(() => {
+      if (!diary || dirtyRef.current) {
+        return;
+      }
+      applyCoverState(getEffectiveCover(diary));
+    }, [diary, applyCoverState]),
+  );
+
+  useEffect(() => {
+    if (!diary || dirtyRef.current) {
+      return;
+    }
+    applyCoverState(getEffectiveCover(diary));
+  }, [diary?.cover, diary?.coverDraft, diary?.photos, applyCoverState, diary]);
 
   const rememberColor = useCallback((hex: string) => {
     setColorHistory((prev) => {
@@ -235,7 +271,7 @@ export function DiaryCoverEditScreen({ navigation, route }: Props) {
       return;
     }
     if (fromTripEnd) {
-      navigation.replace('DiaryEdit', { diaryId });
+      navigation.replace('DiaryEdit', { diaryId, mode: 'edit' });
       return;
     }
     navigation.goBack();
