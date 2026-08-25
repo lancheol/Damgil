@@ -7,9 +7,11 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
+  Animated,
   Dimensions,
   Image,
   Keyboard,
+  PanResponder,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -63,7 +65,9 @@ type PlaceRelatedDiary = {
 
 /** 카드가 마커를 가리지 않도록 지도를 살짝 위로 밀어주는 값 */
 const FOCUS_LAT_OFFSET = 0.006;
-const SHEET_MAX_HEIGHT = Math.round(Dimensions.get('window').height * 0.48);
+const WINDOW_HEIGHT = Dimensions.get('window').height;
+/** 접힌 시트 높이 (기존 떠 있는 카드와 비슷한 비율) */
+const SHEET_COLLAPSED_HEIGHT = Math.round(WINDOW_HEIGHT * 0.48);
 
 /** 세션 중 빠른 복원용 (앱 재시작 시 AsyncStorage에서 다시 채움) */
 let memoryShowsUserLocation = false;
@@ -99,7 +103,7 @@ const MOCK_RELATED_DIARIES: PlaceRelatedDiary[] = [
   },
 ];
 
-export function MapScreen({ route }: Props) {
+export function MapScreen({ navigation, route }: Props) {
   const insets = useSafeAreaInsets();
   const mapRef = useRef<MapView | null>(null);
   const [query, setQuery] = useState('');
@@ -119,8 +123,102 @@ export function MapScreen({ route }: Props) {
   const [suggestions, setSuggestions] = useState<MapLocation[]>([]);
   const [dropdownOpen, setDropdownOpen] = useState(false);
   const [searching, setSearching] = useState(false);
+  const [sheetExpanded, setSheetExpanded] = useState(false);
   const searchSeqRef = useRef(0);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const sheetHeight = useRef(new Animated.Value(SHEET_COLLAPSED_HEIGHT)).current;
+  const sheetDragStart = useRef(SHEET_COLLAPSED_HEIGHT);
+
+  const tabClearance = insets.bottom + 88;
+  /** 펼침 = 화면 전체 높이 */
+  const sheetExpandedHeight = WINDOW_HEIGHT;
+
+  const snapSheetTo = useCallback(
+    (expanded: boolean) => {
+      const next = expanded ? sheetExpandedHeight : SHEET_COLLAPSED_HEIGHT;
+      setSheetExpanded(expanded);
+      if (expanded) {
+        Keyboard.dismiss();
+        setDropdownOpen(false);
+      }
+      Animated.spring(sheetHeight, {
+        toValue: next,
+        useNativeDriver: false,
+        friction: 9,
+        tension: 70,
+      }).start();
+    },
+    [sheetExpandedHeight, sheetHeight],
+  );
+
+  const sheetPanResponder = useMemo(
+    () =>
+      PanResponder.create({
+        onStartShouldSetPanResponder: () => true,
+        onMoveShouldSetPanResponder: (_, gesture) => Math.abs(gesture.dy) > 3,
+        onPanResponderTerminationRequest: () => false,
+        onPanResponderGrant: () => {
+          sheetHeight.stopAnimation((value) => {
+            sheetDragStart.current = value;
+          });
+        },
+        onPanResponderMove: (_, gesture) => {
+          const next = Math.min(
+            sheetExpandedHeight,
+            Math.max(SHEET_COLLAPSED_HEIGHT, sheetDragStart.current - gesture.dy),
+          );
+          sheetHeight.setValue(next);
+          const mid = (SHEET_COLLAPSED_HEIGHT + sheetExpandedHeight) / 2;
+          const expanded = next >= mid;
+          setSheetExpanded((prev) => {
+            if (prev === expanded) {
+              return prev;
+            }
+            if (expanded) {
+              Keyboard.dismiss();
+              setDropdownOpen(false);
+            }
+            return expanded;
+          });
+        },
+        onPanResponderRelease: (_, gesture) => {
+          const mid = (SHEET_COLLAPSED_HEIGHT + sheetExpandedHeight) / 2;
+          sheetHeight.stopAnimation((value) => {
+            const flingUp = gesture.vy < -0.55;
+            const flingDown = gesture.vy > 0.55;
+            if (flingUp) {
+              snapSheetTo(true);
+              return;
+            }
+            if (flingDown) {
+              snapSheetTo(false);
+              return;
+            }
+            snapSheetTo(value >= mid);
+          });
+        },
+      }),
+    [sheetExpandedHeight, sheetHeight, snapSheetTo],
+  );
+
+  useEffect(() => {
+    setSheetExpanded(false);
+    sheetHeight.setValue(SHEET_COLLAPSED_HEIGHT);
+  }, [selectedId, sheetHeight]);
+
+  useEffect(() => {
+    navigation.setOptions({
+      tabBarStyle: sheetExpanded ? { display: 'none' } : undefined,
+    });
+  }, [navigation, sheetExpanded]);
+
+  useFocusEffect(
+    useCallback(() => {
+      return () => {
+        navigation.setOptions({ tabBarStyle: undefined });
+      };
+    }, [navigation]),
+  );
 
   const savedPins = useMemo(
     () =>
@@ -589,6 +687,7 @@ export function MapScreen({ route }: Props) {
         </View>
       )}
 
+      {!sheetExpanded ? (
       <View style={[styles.topArea, { paddingTop: insets.top + spacing.sm }]} pointerEvents="box-none">
         <View style={styles.searchBlock}>
           <View style={styles.searchBar}>
@@ -692,27 +791,59 @@ export function MapScreen({ route }: Props) {
           ))}
         </ScrollView>
       </View>
+      ) : null}
 
       <View
-        style={[styles.bottomArea, { paddingBottom: insets.bottom + 88 }]}
+        style={[
+          styles.bottomArea,
+          { paddingBottom: selectedPlace ? 0 : tabClearance },
+        ]}
         pointerEvents="box-none"
       >
-        <View style={styles.locateRow} pointerEvents="box-none">
-          <Pressable
-            accessibilityRole="button"
-            accessibilityLabel="현재 위치로 이동"
-            style={styles.locateButton}
-            onPress={() => {
-              void handleMoveToUser();
-            }}
+        {!sheetExpanded ? (
+          <View
+            style={[
+              styles.locateRow,
+              selectedPlace ? { marginBottom: spacing.sm } : null,
+            ]}
+            pointerEvents="box-none"
           >
-            <Ionicons name="locate" size={18} color="#1E2939" />
-          </Pressable>
-        </View>
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel="현재 위치로 이동"
+              style={styles.locateButton}
+              onPress={() => {
+                void handleMoveToUser();
+              }}
+            >
+              <Ionicons name="locate" size={18} color="#1E2939" />
+            </Pressable>
+          </View>
+        ) : null}
 
         {selectedPlace ? (
-          <View style={[styles.sheet, { maxHeight: SHEET_MAX_HEIGHT }]}>
-            <View style={styles.sheetHandle} />
+          <Animated.View
+            style={[
+              styles.sheet,
+              sheetExpanded ? styles.sheetFullscreen : null,
+              {
+                height: sheetHeight,
+                paddingTop: sheetExpanded ? insets.top : 0,
+                paddingBottom: sheetExpanded ? insets.bottom + spacing.md : tabClearance,
+              },
+            ]}
+          >
+            <View
+              accessibilityRole="adjustable"
+              accessibilityLabel={
+                sheetExpanded ? '시트 줄이기' : '시트 전체 화면으로 펼치기'
+              }
+              accessibilityHint="위로 올리면 전체 화면, 아래로 내리면 접힙니다"
+              style={styles.sheetHandleHit}
+              {...sheetPanResponder.panHandlers}
+            >
+              <View style={styles.sheetHandle} />
+            </View>
 
             <View style={styles.cardHeader}>
               <View style={styles.cardHeaderText}>
@@ -801,7 +932,7 @@ export function MapScreen({ route }: Props) {
                 ))
               )}
             </ScrollView>
-          </View>
+          </Animated.View>
         ) : null}
       </View>
     </View>
@@ -1015,27 +1146,39 @@ const styles = StyleSheet.create({
     elevation: 4,
   },
   sheet: {
-    marginHorizontal: spacing.lg,
+    width: '100%',
     paddingHorizontal: spacing.lg,
+    paddingTop: 0,
+    borderTopLeftRadius: 24,
+    borderTopRightRadius: 24,
+    backgroundColor: colors.white,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderColor: '#E5E7EB',
+    shadowColor: colors.black,
+    shadowOpacity: 0.14,
+    shadowRadius: 16,
+    shadowOffset: { width: 0, height: -4 },
+    elevation: 14,
+    overflow: 'hidden',
+  },
+  sheetFullscreen: {
+    borderTopLeftRadius: 0,
+    borderTopRightRadius: 0,
+    borderTopWidth: 0,
+    elevation: 24,
+    zIndex: 30,
+  },
+  sheetHandleHit: {
+    alignItems: 'center',
+    justifyContent: 'center',
     paddingTop: spacing.sm,
     paddingBottom: spacing.md,
-    borderRadius: 24,
-    backgroundColor: colors.white,
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: '#F3F4F6',
-    shadowColor: colors.black,
-    shadowOpacity: 0.16,
-    shadowRadius: 20,
-    shadowOffset: { width: 0, height: 12 },
-    elevation: 12,
   },
   sheetHandle: {
-    alignSelf: 'center',
-    width: 36,
+    width: 40,
     height: 4,
     borderRadius: 2,
-    backgroundColor: '#E5E7EB',
-    marginBottom: spacing.md,
+    backgroundColor: '#D1D5DB',
   },
   cardHeader: {
     flexDirection: 'row',
@@ -1130,10 +1273,12 @@ const styles = StyleSheet.create({
     color: '#6A7282',
   },
   diaryList: {
-    flexGrow: 0,
+    flex: 1,
+    minHeight: 0,
   },
   diaryListContent: {
-    paddingBottom: spacing.xs,
+    paddingBottom: spacing.sm,
+    flexGrow: 1,
   },
   diaryEmptyText: {
     paddingVertical: spacing.lg,

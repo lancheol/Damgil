@@ -41,8 +41,21 @@ const TABS: TabConfig[] = [
   },
 ];
 
-export function FloatingTabBar({ state, navigation }: BottomTabBarProps) {
+export function FloatingTabBar({ state, navigation, descriptors }: BottomTabBarProps) {
   const insets = useSafeAreaInsets();
+  const focusedRoute = state.routes[state.index];
+  const focusedOptions = focusedRoute ? descriptors[focusedRoute.key]?.options : undefined;
+  const tabBarStyle = focusedOptions?.tabBarStyle;
+  const hidden =
+    tabBarStyle != null &&
+    typeof tabBarStyle === 'object' &&
+    !Array.isArray(tabBarStyle) &&
+    'display' in tabBarStyle &&
+    tabBarStyle.display === 'none';
+
+  if (hidden) {
+    return null;
+  }
 
   return (
     <View style={[styles.wrap, { paddingBottom: Math.max(insets.bottom, spacing.sm) }]}>

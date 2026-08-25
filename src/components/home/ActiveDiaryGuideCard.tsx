@@ -81,8 +81,8 @@ const styles = StyleSheet.create({
   },
   coverFlush: {
     paddingHorizontal: 0,
-    paddingTop: 9,
-    paddingBottom: 9,
+    paddingTop: 10,
+    paddingBottom: 10,
     paddingLeft: 0,
     paddingRight: 14,
   },

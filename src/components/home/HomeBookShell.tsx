@@ -9,7 +9,7 @@ type HomeBookShellProps = {
   contentStyle?: StyleProp<ViewStyle>;
   /** 표지 꾸미기에서 고른 책껍데기 색 */
   coverColor?: string;
-  /** 책등 너비 (기본 28) */
+  /** 책등 너비 (기본 22) */
   spineWidth?: number;
   /** 책등 왼쪽 이동 (음수면 왼쪽으로) */
   spineOffsetX?: number;
@@ -21,7 +21,7 @@ type HomeBookShellProps = {
   hidePageEdge?: boolean;
 };
 
-/** 홈 검정 블록용 책 형태(책등·페이지 엣지) */
+/** 홈 검정 블록용 책 형태(책등·페이지 엣지) — 아날로그 책 실루엣, 소프트한 깊이감 */
 export function HomeBookShell({
   children,
   style,
@@ -37,26 +37,36 @@ export function HomeBookShell({
 
   return (
     <View style={[styles.book, shellColor ? { backgroundColor: shellColor } : null, style]}>
+      {/* 바깥 하이라이트 림 — 평평한 검정 덩어리 느낌을 줄임 */}
+      <View pointerEvents="none" style={styles.rim} />
+
       <View
         style={[
           styles.spine,
           typeof spineWidth === 'number' ? { width: spineWidth } : null,
           typeof spineOffsetX === 'number' ? { marginLeft: spineOffsetX } : null,
           shellColor
-            ? { backgroundColor: shellColor, borderRightColor: 'rgba(0,0,0,0.18)' }
+            ? { backgroundColor: shellColor, borderRightColor: 'rgba(0,0,0,0.22)' }
             : null,
         ]}
       >
+        <View pointerEvents="none" style={styles.spineHighlight} />
+        <View pointerEvents="none" style={styles.spineShade} />
         {hideSpineRidges ? null : (
-          <>
+          <View style={styles.spineRidges}>
             <View style={styles.spineRidge} />
             <View style={styles.spineRidge} />
             <View style={styles.spineRidge} />
-          </>
+            <View style={styles.spineRidge} />
+          </View>
         )}
       </View>
 
-      <View style={[styles.cover, contentStyle]}>{children}</View>
+      <View style={styles.coverWrap}>
+        {/* 책등→표지 경계의 얕은 음영 */}
+        <View pointerEvents="none" style={styles.gutterShadow} />
+        <View style={[styles.cover, contentStyle]}>{children}</View>
+      </View>
 
       {hidePageEdge ? null : (
         <View pointerEvents="none" style={styles.pageEdge}>
@@ -75,32 +85,75 @@ const styles = StyleSheet.create({
   book: {
     flex: 1,
     flexDirection: 'row',
-    backgroundColor: colors.black,
+    backgroundColor: '#141414',
     borderRadius: radii.xl,
     marginHorizontal: spacing.xl,
     overflow: 'hidden',
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: 'rgba(255,255,255,0.1)',
     shadowColor: colors.black,
-    shadowOpacity: 0.25,
-    shadowRadius: 12,
-    shadowOffset: { width: 0, height: 8 },
-    elevation: 6,
+    shadowOpacity: 0.28,
+    shadowRadius: 22,
+    shadowOffset: { width: 0, height: 12 },
+    elevation: 8,
+  },
+  rim: {
+    ...StyleSheet.absoluteFillObject,
+    borderRadius: radii.xl,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: 'rgba(255,255,255,0.06)',
   },
   spine: {
-    width: 28,
+    width: 22,
     backgroundColor: '#0A0A0A',
-    borderRightWidth: 1,
-    borderRightColor: '#2A2A2A',
+    borderRightWidth: StyleSheet.hairlineWidth,
+    borderRightColor: 'rgba(255,255,255,0.07)',
     alignItems: 'center',
     justifyContent: 'center',
-    gap: 14,
-    paddingVertical: spacing.xl,
+    overflow: 'hidden',
+  },
+  spineHighlight: {
+    position: 'absolute',
+    left: 0,
+    top: 0,
+    bottom: 0,
+    width: 4,
+    backgroundColor: 'rgba(255,255,255,0.07)',
+  },
+  spineShade: {
+    position: 'absolute',
+    right: 0,
+    top: 0,
+    bottom: 0,
+    width: 6,
+    backgroundColor: 'rgba(0,0,0,0.35)',
+  },
+  spineRidges: {
+    height: '62%',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingVertical: spacing.md,
+    gap: 10,
   },
   spineRidge: {
-    width: 3,
+    width: 2,
     flex: 1,
-    maxHeight: 48,
-    borderRadius: radii.pill,
-    backgroundColor: '#2E2E2E',
+    maxHeight: 44,
+    borderRadius: 1,
+    backgroundColor: 'rgba(255,255,255,0.14)',
+  },
+  coverWrap: {
+    flex: 1,
+    position: 'relative',
+  },
+  gutterShadow: {
+    position: 'absolute',
+    left: 0,
+    top: 0,
+    bottom: 0,
+    width: 10,
+    zIndex: 1,
+    backgroundColor: 'rgba(0,0,0,0.18)',
   },
   cover: {
     flex: 1,
@@ -111,35 +164,35 @@ const styles = StyleSheet.create({
   },
   pageEdge: {
     position: 'absolute',
-    top: 9,
-    bottom: 9,
-    right: 3,
-    width: 14,
+    top: 10,
+    bottom: 10,
+    right: 4,
+    width: 12,
   },
   pageSheet: {
     position: 'absolute',
     top: 0,
     bottom: 0,
-    borderTopRightRadius: 100,
-    borderBottomRightRadius: 100,
+    borderTopRightRadius: 80,
+    borderBottomRightRadius: 80,
   },
   pageSheetBack: {
     right: 0,
-    width: 14,
-    backgroundColor: '#E8E2D4',
-    opacity: 0.55,
+    width: 12,
+    backgroundColor: '#E8E8E8',
+    opacity: 0.7,
   },
   pageSheetMid: {
     right: 2,
-    width: 12,
-    backgroundColor: '#F0EBE0',
-    opacity: 0.8,
+    width: 10,
+    backgroundColor: '#F2F2F2',
+    opacity: 0.9,
   },
   pageSheetFront: {
     right: 4,
-    width: 10,
-    backgroundColor: '#F7F3EA',
+    width: 8,
+    backgroundColor: '#FAFAFA',
     borderLeftWidth: StyleSheet.hairlineWidth,
-    borderLeftColor: 'rgba(255,255,255,0.35)',
+    borderLeftColor: 'rgba(0,0,0,0.06)',
   },
 });
