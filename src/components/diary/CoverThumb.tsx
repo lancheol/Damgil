@@ -1,4 +1,4 @@
-import { useMemo } from 'react';
+import { memo, useMemo } from 'react';
 import { Image, StyleSheet, View, ViewStyle } from 'react-native';
 
 import { CoverCanvas } from './CoverCanvas';
@@ -17,10 +17,20 @@ type CoverThumbProps = {
   fill?: boolean;
 };
 
-/** 검색·마이페이지 등 작은 영역 — 편집 화면과 같은 CoverCanvas, 캔버스 너비 비례 레이어 */
-export function CoverThumb({ diary, style }: CoverThumbProps) {
+/** 검색·마이페이지 등 작은 영역 — 서버 thumb 우선, 없을 때만 CoverCanvas */
+function CoverThumbComponent({ diary, style }: CoverThumbProps) {
   const cover = getEffectiveCover(diary);
   const photos = useMemo(() => diary?.photos ?? [], [diary?.photos]);
+  const remoteThumb = diary?.coverThumbUrl?.trim() || null;
+
+  // 목록 성능: 원격 썸네일이 있으면 풀 캔버스 대신 Image
+  if (remoteThumb) {
+    return (
+      <View style={[styles.root, style]} pointerEvents="none">
+        <Image source={{ uri: remoteThumb }} style={styles.remoteThumb} resizeMode="cover" />
+      </View>
+    );
+  }
 
   const hasDecoration = hasCoverDecorationLayout(cover);
   const hasLocalCoverVisual =
@@ -33,16 +43,11 @@ export function CoverThumb({ diary, style }: CoverThumbProps) {
     (typeof cover.titleY === 'number' && Math.abs(cover.titleY - 0.5) > 0.001) ||
     (Boolean(cover.backgroundColor?.trim()) &&
       cover.backgroundColor?.trim().toUpperCase() !== '#1A1A1A');
-  const remoteThumb = diary?.coverThumbUrl?.trim() || null;
 
   const photoById = useMemo(() => indexPhotosById(photos), [photos]);
 
-  if (!hasLocalCoverVisual && remoteThumb) {
-    return (
-      <View style={[styles.root, style]} pointerEvents="none">
-        <Image source={{ uri: remoteThumb }} style={styles.remoteThumb} resizeMode="cover" />
-      </View>
-    );
+  if (!hasLocalCoverVisual) {
+    return <View style={[styles.root, style]} pointerEvents="none" />;
   }
 
   return (
@@ -71,6 +76,8 @@ export function CoverThumb({ diary, style }: CoverThumbProps) {
   );
 }
 
+export const CoverThumb = memo(CoverThumbComponent);
+
 const styles = StyleSheet.create({
   root: {
     flex: 1,
@@ -78,10 +85,8 @@ const styles = StyleSheet.create({
   },
   canvas: {
     ...StyleSheet.absoluteFillObject,
-    borderRadius: 0,
   },
   remoteThumb: {
-    width: '100%',
-    height: '100%',
+    ...StyleSheet.absoluteFillObject,
   },
 });

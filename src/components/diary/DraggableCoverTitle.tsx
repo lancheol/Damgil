@@ -12,6 +12,7 @@ import { CoverFontId } from '../../types/diary';
 import { clampStickerScale, normalizeRotation } from '../../utils/stickerTransform';
 import { getCoverFontStyle } from '../../utils/diaryCover';
 import { colors } from '../../theme';
+import { useLiveDecorTransform } from './useLiveDecorTransform';
 
 type Props = {
   title: string;
@@ -85,8 +86,12 @@ export function DraggableCoverTitle({
   onDragPointer,
   onDragEnd,
 }: Props) {
-  const transformRef = useRef({ x, y, scale, rotation });
-  transformRef.current = { x, y, scale, rotation };
+  const { live, liveRef, beginDrag, patchLive, endDrag } = useLiveDecorTransform({
+    x,
+    y,
+    scale,
+    rotation,
+  });
   const [box, setBox] = useState({ width: 160, height: 48 });
 
   const modeRef = useRef<'move' | 'pinch'>('move');
@@ -120,20 +125,27 @@ export function DraggableCoverTitle({
     modeRef.current = 'pinch';
     movedRef.current = true;
     pinchStartDistRef.current = touchDistance(touches);
-    pinchStartScaleRef.current = transformRef.current.scale;
+    pinchStartScaleRef.current = liveRef.current.scale;
     pinchStartAngleRef.current = touchAngle(touches);
-    pinchStartRotationRef.current = transformRef.current.rotation;
+    pinchStartRotationRef.current = liveRef.current.rotation;
   };
 
   const applyPinch = (touches: NativeTouchEvent[]) => {
     const dist = touchDistance(touches);
-    onScaleRef.current(
-      clampStickerScale(
+    const angleDelta = shortestAngleDelta(pinchStartAngleRef.current, touchAngle(touches));
+    patchLive({
+      scale: clampStickerScale(
         pinchStartScaleRef.current * (dist / Math.max(pinchStartDistRef.current, 1)),
       ),
-    );
-    const angleDelta = shortestAngleDelta(pinchStartAngleRef.current, touchAngle(touches));
-    onRotateRef.current(normalizeRotation(pinchStartRotationRef.current + angleDelta));
+      rotation: normalizeRotation(pinchStartRotationRef.current + angleDelta),
+    });
+  };
+
+  const commitLive = () => {
+    const final = endDrag();
+    onMoveRef.current(final.x, final.y);
+    onScaleRef.current(final.scale);
+    onRotateRef.current(final.rotation);
   };
 
   const panResponder = useRef(
@@ -148,6 +160,7 @@ export function DraggableCoverTitle({
         const { touches, pageX, pageY } = event.nativeEvent;
         lastPageRef.current = { x: pageX, y: pageY };
         movedRef.current = false;
+        beginDrag();
         onDragChangeRef.current?.(true);
         onDragPointerRef.current?.(pageX, pageY);
         onSelectRef.current();
@@ -183,16 +196,17 @@ export function DraggableCoverTitle({
           movedRef.current = true;
         }
         lastPageRef.current = { x: pageX, y: pageY };
-        onMoveRef.current(
-          Math.min(0.92, Math.max(0.08, transformRef.current.x + dx)),
-          Math.min(0.92, Math.max(0.08, transformRef.current.y + dy)),
-        );
+        patchLive({
+          x: Math.min(0.92, Math.max(0.08, liveRef.current.x + dx)),
+          y: Math.min(0.92, Math.max(0.08, liveRef.current.y + dy)),
+        });
       },
       onPanResponderRelease: (event) => {
         const { pageX, pageY } = event.nativeEvent;
         const wasSelected = selectedRef.current;
         const didMove = movedRef.current;
         modeRef.current = 'move';
+        commitLive();
         onDragPointerRef.current?.(pageX, pageY);
         onDragEndRef.current?.(pageX, pageY);
         onDragChangeRef.current?.(false);
@@ -203,6 +217,7 @@ export function DraggableCoverTitle({
       onPanResponderTerminate: (event) => {
         const { pageX, pageY } = event.nativeEvent;
         modeRef.current = 'move';
+        commitLive();
         if (typeof pageX === 'number' && typeof pageY === 'number') {
           onDragPointerRef.current?.(pageX, pageY);
           onDragEndRef.current?.(pageX, pageY);
@@ -228,8 +243,8 @@ export function DraggableCoverTitle({
       style={[
         styles.hit,
         {
-          left: `${x * 100}%` as unknown as number,
-          top: `${y * 100}%` as unknown as number,
+          left: `${live.x * 100}%` as unknown as number,
+          top: `${live.y * 100}%` as unknown as number,
           marginLeft: -box.width / 2,
           marginTop: -box.height / 2,
         },
@@ -245,7 +260,7 @@ export function DraggableCoverTitle({
             maxWidth: 260 * unit,
           },
           selected && editable ? styles.selected : null,
-          { transform: [{ scale }, { rotate: `${rotation}deg` }] },
+          { transform: [{ scale: live.scale }, { rotate: `${live.rotation}deg` }] },
         ]}
       >
         <Text

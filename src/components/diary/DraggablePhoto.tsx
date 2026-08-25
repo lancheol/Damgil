@@ -12,6 +12,7 @@ import {
   clampStickerScale,
   normalizeRotation,
 } from './DraggableSticker';
+import { useLiveDecorTransform } from './useLiveDecorTransform';
 import { DecorPhotoLayer, PhotoCropRect } from '../../types/diary';
 import { normalizeCropRect } from '../../utils/diaryTextLayers';
 import { colors } from '../../theme';
@@ -105,8 +106,12 @@ export function DraggablePhoto({
   onDragEnd,
   onDragPointer,
 }: DraggablePhotoProps) {
-  const layerRef = useRef(layer);
-  layerRef.current = layer;
+  const { live, liveRef, beginDrag, patchLive, endDrag } = useLiveDecorTransform({
+    x: layer.x,
+    y: layer.y,
+    scale: layer.scale,
+    rotation: layer.rotation,
+  });
 
   const modeRef = useRef<'move' | 'pinch'>('move');
   const lastPageRef = useRef({ x: 0, y: 0 });
@@ -133,9 +138,9 @@ export function DraggablePhoto({
   const beginPinch = (touches: NativeTouchEvent[]) => {
     modeRef.current = 'pinch';
     pinchStartDistRef.current = touchDistance(touches);
-    pinchStartScaleRef.current = layerRef.current.scale;
+    pinchStartScaleRef.current = liveRef.current.scale;
     pinchStartAngleRef.current = touchAngle(touches);
-    pinchStartRotationRef.current = layerRef.current.rotation;
+    pinchStartRotationRef.current = liveRef.current.rotation;
   };
 
   const applyPinch = (touches: NativeTouchEvent[]) => {
@@ -143,9 +148,18 @@ export function DraggablePhoto({
     const nextScale = clampStickerScale(
       pinchStartScaleRef.current * (dist / Math.max(pinchStartDistRef.current, 1)),
     );
-    onScaleRef.current(nextScale);
     const angleDelta = shortestAngleDelta(pinchStartAngleRef.current, touchAngle(touches));
-    onRotateRef.current(normalizeRotation(pinchStartRotationRef.current + angleDelta));
+    patchLive({
+      scale: nextScale,
+      rotation: normalizeRotation(pinchStartRotationRef.current + angleDelta),
+    });
+  };
+
+  const commitLive = () => {
+    const final = endDrag();
+    onMoveRef.current(final.x, final.y);
+    onScaleRef.current(final.scale);
+    onRotateRef.current(final.rotation);
   };
 
   const panResponder = useRef(
@@ -159,6 +173,7 @@ export function DraggablePhoto({
       onPanResponderGrant: (event: GestureResponderEvent) => {
         const { touches, pageX, pageY } = event.nativeEvent;
         lastPageRef.current = { x: pageX, y: pageY };
+        beginDrag();
         onDragChangeRef.current?.(true);
         onDragPointerRef.current?.(pageX, pageY);
         onSelectRef.current();
@@ -187,13 +202,15 @@ export function DraggablePhoto({
         const dx = (pageX - lastPageRef.current.x) / Math.max(width, 1);
         const dy = (pageY - lastPageRef.current.y) / Math.max(height, 1);
         lastPageRef.current = { x: pageX, y: pageY };
-        const nextX = Math.min(0.92, Math.max(0.08, layerRef.current.x + dx));
-        const nextY = Math.min(0.92, Math.max(0.08, layerRef.current.y + dy));
-        onMoveRef.current(nextX, nextY);
+        patchLive({
+          x: Math.min(0.92, Math.max(0.08, liveRef.current.x + dx)),
+          y: Math.min(0.92, Math.max(0.08, liveRef.current.y + dy)),
+        });
       },
       onPanResponderRelease: (event) => {
         const { pageX, pageY } = event.nativeEvent;
         modeRef.current = 'move';
+        commitLive();
         onDragPointerRef.current?.(pageX, pageY);
         onDragEndRef.current?.(pageX, pageY);
         onDragChangeRef.current?.(false);
@@ -201,6 +218,7 @@ export function DraggablePhoto({
       onPanResponderTerminate: (event) => {
         const { pageX, pageY } = event.nativeEvent;
         modeRef.current = 'move';
+        commitLive();
         if (typeof pageX === 'number' && typeof pageY === 'number') {
           onDragPointerRef.current?.(pageX, pageY);
           onDragEndRef.current?.(pageX, pageY);
@@ -227,11 +245,11 @@ export function DraggablePhoto({
         {
           width: frameSize.width,
           height: frameSize.height,
-          left: `${layer.x * 100}%` as unknown as number,
-          top: `${layer.y * 100}%` as unknown as number,
+          left: `${live.x * 100}%` as unknown as number,
+          top: `${live.y * 100}%` as unknown as number,
           marginLeft: -frameSize.width / 2,
           marginTop: -frameSize.height / 2,
-          transform: [{ scale: layer.scale }, { rotate: `${layer.rotation}deg` }],
+          transform: [{ scale: live.scale }, { rotate: `${live.rotation}deg` }],
           zIndex: selected ? 20 : 5,
         },
       ]}

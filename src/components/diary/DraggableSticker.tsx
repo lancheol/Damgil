@@ -8,6 +8,7 @@ import {
   View,
 } from 'react-native';
 
+import { useLiveDecorTransform } from './useLiveDecorTransform';
 import { DecorSticker } from '../../types/diary';
 import { colors } from '../../theme';
 import { clampStickerScale, normalizeRotation } from '../../utils/stickerTransform';
@@ -73,8 +74,12 @@ export function DraggableSticker({
   onDragEnd,
   onDragPointer,
 }: DraggableStickerProps) {
-  const stickerRef = useRef(sticker);
-  stickerRef.current = sticker;
+  const { live, liveRef, beginDrag, patchLive, endDrag } = useLiveDecorTransform({
+    x: sticker.x,
+    y: sticker.y,
+    scale: sticker.scale,
+    rotation: sticker.rotation,
+  });
 
   const modeRef = useRef<'move' | 'pinch'>('move');
   const lastPageRef = useRef({ x: 0, y: 0 });
@@ -101,9 +106,9 @@ export function DraggableSticker({
   const beginPinch = (touches: NativeTouchEvent[]) => {
     modeRef.current = 'pinch';
     pinchStartDistRef.current = touchDistance(touches);
-    pinchStartScaleRef.current = stickerRef.current.scale;
+    pinchStartScaleRef.current = liveRef.current.scale;
     pinchStartAngleRef.current = touchAngle(touches);
-    pinchStartRotationRef.current = stickerRef.current.rotation;
+    pinchStartRotationRef.current = liveRef.current.rotation;
   };
 
   const applyPinch = (touches: NativeTouchEvent[]) => {
@@ -111,10 +116,18 @@ export function DraggableSticker({
     const nextScale = clampStickerScale(
       pinchStartScaleRef.current * (dist / Math.max(pinchStartDistRef.current, 1)),
     );
-    onScaleRef.current(nextScale);
-
     const angleDelta = shortestAngleDelta(pinchStartAngleRef.current, touchAngle(touches));
-    onRotateRef.current(normalizeRotation(pinchStartRotationRef.current + angleDelta));
+    patchLive({
+      scale: nextScale,
+      rotation: normalizeRotation(pinchStartRotationRef.current + angleDelta),
+    });
+  };
+
+  const commitLive = () => {
+    const final = endDrag();
+    onMoveRef.current(final.x, final.y);
+    onScaleRef.current(final.scale);
+    onRotateRef.current(final.rotation);
   };
 
   const panResponder = useRef(
@@ -128,6 +141,7 @@ export function DraggableSticker({
       onPanResponderGrant: (event: GestureResponderEvent) => {
         const { touches, pageX, pageY } = event.nativeEvent;
         lastPageRef.current = { x: pageX, y: pageY };
+        beginDrag();
         onDragChangeRef.current?.(true);
         onDragPointerRef.current?.(pageX, pageY);
         onSelectRef.current();
@@ -161,13 +175,15 @@ export function DraggableSticker({
         const dy = (pageY - lastPageRef.current.y) / Math.max(height, 1);
         lastPageRef.current = { x: pageX, y: pageY };
 
-        const nextX = Math.min(0.92, Math.max(0.08, stickerRef.current.x + dx));
-        const nextY = Math.min(0.92, Math.max(0.08, stickerRef.current.y + dy));
-        onMoveRef.current(nextX, nextY);
+        patchLive({
+          x: Math.min(0.92, Math.max(0.08, liveRef.current.x + dx)),
+          y: Math.min(0.92, Math.max(0.08, liveRef.current.y + dy)),
+        });
       },
       onPanResponderRelease: (event) => {
         const { pageX, pageY } = event.nativeEvent;
         modeRef.current = 'move';
+        commitLive();
         onDragPointerRef.current?.(pageX, pageY);
         onDragEndRef.current?.(pageX, pageY);
         onDragChangeRef.current?.(false);
@@ -175,6 +191,7 @@ export function DraggableSticker({
       onPanResponderTerminate: (event) => {
         const { pageX, pageY } = event.nativeEvent;
         modeRef.current = 'move';
+        commitLive();
         if (typeof pageX === 'number' && typeof pageY === 'number') {
           onDragPointerRef.current?.(pageX, pageY);
           onDragEndRef.current?.(pageX, pageY);
@@ -200,11 +217,11 @@ export function DraggableSticker({
         {
           width: hitSize,
           height: hitSize,
-          left: `${sticker.x * 100}%` as unknown as number,
-          top: `${sticker.y * 100}%` as unknown as number,
+          left: `${live.x * 100}%` as unknown as number,
+          top: `${live.y * 100}%` as unknown as number,
           marginLeft: -hitSize / 2,
           marginTop: -hitSize / 2,
-          transform: [{ scale: sticker.scale }, { rotate: `${sticker.rotation}deg` }],
+          transform: [{ scale: live.scale }, { rotate: `${live.rotation}deg` }],
         },
       ]}
     >
@@ -258,6 +275,9 @@ export function useCanvasPinchHandlers({
   const pinchStartScaleRef = useRef(1);
   const pinchStartAngleRef = useRef(0);
   const pinchStartRotationRef = useRef(0);
+  const pendingScaleRef = useRef<number | null>(null);
+  const pendingRotationRef = useRef<number | null>(null);
+  const rafRef = useRef<number | null>(null);
 
   const beginPinch = (touches: NativeTouchEvent[]) => {
     modeRef.current = true;
@@ -267,6 +287,17 @@ export function useCanvasPinchHandlers({
     pinchStartAngleRef.current = touchAngle(touches);
     pinchStartRotationRef.current = transform.rotation;
     onDragChangeRef.current?.(true);
+  };
+
+  const flushPending = (id: string) => {
+    if (pendingScaleRef.current != null) {
+      onScaleRef.current(id, pendingScaleRef.current);
+      pendingScaleRef.current = null;
+    }
+    if (pendingRotationRef.current != null) {
+      onRotateRef.current(id, pendingRotationRef.current);
+      pendingRotationRef.current = null;
+    }
   };
 
   const panResponder = useRef(
@@ -295,19 +326,45 @@ export function useCanvasPinchHandlers({
           beginPinch(touches);
         }
         const dist = touchDistance(touches);
-        onScaleRef.current(
-          id,
-          clampStickerScale(pinchStartScaleRef.current * (dist / Math.max(pinchStartDistRef.current, 1))),
+        pendingScaleRef.current = clampStickerScale(
+          pinchStartScaleRef.current * (dist / Math.max(pinchStartDistRef.current, 1)),
         );
         const angleDelta = shortestAngleDelta(pinchStartAngleRef.current, touchAngle(touches));
-        onRotateRef.current(id, normalizeRotation(pinchStartRotationRef.current + angleDelta));
+        pendingRotationRef.current = normalizeRotation(
+          pinchStartRotationRef.current + angleDelta,
+        );
+        if (rafRef.current == null) {
+          rafRef.current = requestAnimationFrame(() => {
+            rafRef.current = null;
+            const selectedId = selectedIdRef.current;
+            if (selectedId) {
+              flushPending(selectedId);
+            }
+          });
+        }
       },
       onPanResponderRelease: () => {
         modeRef.current = false;
+        if (rafRef.current != null) {
+          cancelAnimationFrame(rafRef.current);
+          rafRef.current = null;
+        }
+        const id = selectedIdRef.current;
+        if (id) {
+          flushPending(id);
+        }
         onDragChangeRef.current?.(false);
       },
       onPanResponderTerminate: () => {
         modeRef.current = false;
+        if (rafRef.current != null) {
+          cancelAnimationFrame(rafRef.current);
+          rafRef.current = null;
+        }
+        const id = selectedIdRef.current;
+        if (id) {
+          flushPending(id);
+        }
         onDragChangeRef.current?.(false);
       },
     }),

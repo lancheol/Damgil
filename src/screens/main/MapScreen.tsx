@@ -36,6 +36,7 @@ import { mapPlaceFromSaved } from '../../utils/savedMapPlaces';
 import {
   loadMapLocationPrefs,
   saveMapLocationPrefs,
+  flushMapLocationPrefs,
 } from '../../utils/mapLocationPrefs';
 import {
   MapLocation,
@@ -168,18 +169,6 @@ export function MapScreen({ navigation, route }: Props) {
             Math.max(SHEET_COLLAPSED_HEIGHT, sheetDragStart.current - gesture.dy),
           );
           sheetHeight.setValue(next);
-          const mid = (SHEET_COLLAPSED_HEIGHT + sheetExpandedHeight) / 2;
-          const expanded = next >= mid;
-          setSheetExpanded((prev) => {
-            if (prev === expanded) {
-              return prev;
-            }
-            if (expanded) {
-              Keyboard.dismiss();
-              setDropdownOpen(false);
-            }
-            return expanded;
-          });
         },
         onPanResponderRelease: (_, gesture) => {
           const mid = (SHEET_COLLAPSED_HEIGHT + sheetExpandedHeight) / 2;
@@ -215,6 +204,7 @@ export function MapScreen({ navigation, route }: Props) {
   useFocusEffect(
     useCallback(() => {
       return () => {
+        flushMapLocationPrefs();
         navigation.setOptions({ tabBarStyle: undefined });
       };
     }, [navigation]),

@@ -155,12 +155,15 @@ export function SearchScreen({ navigation }: Props) {
         concurrency: 3,
         priorityIds: items.slice(0, 6).map((item) => item.id),
         isCancelled: () => feedRequestRef.current !== requestId,
-        onCardEnriched: (enriched) => {
-          setFeedCards((prev) =>
-            prev.map((card) =>
-              card.id === enriched.id ? mergeFeedCardMedia(enriched, card) : card,
-            ),
-          );
+        onCardsEnriched: (enrichedCards) => {
+          if (enrichedCards.length === 0) return;
+          setFeedCards((prev) => {
+            const byId = new Map(enrichedCards.map((card) => [card.id, card]));
+            return prev.map((card) => {
+              const enriched = byId.get(card.id);
+              return enriched ? mergeFeedCardMedia(enriched, card) : card;
+            });
+          });
         },
       });
     } catch {

@@ -9,6 +9,7 @@ import {
 } from 'react-native';
 
 import { clampStickerScale, normalizeRotation } from './DraggableSticker';
+import { useLiveDecorTransform } from './useLiveDecorTransform';
 import { DecorTextLayer } from '../../types/diary';
 import { getDecorFontStyle } from '../../utils/decorAssets';
 import { colors } from '../../theme';
@@ -73,8 +74,12 @@ export function DraggableText({
   onEditRequest,
   onDragPointer,
 }: DraggableTextProps) {
-  const layerRef = useRef(layer);
-  layerRef.current = layer;
+  const { live, liveRef, beginDrag, patchLive, endDrag } = useLiveDecorTransform({
+    x: layer.x,
+    y: layer.y,
+    scale: layer.scale,
+    rotation: layer.rotation,
+  });
   const [box, setBox] = useState({ width: 120, height: 40 });
 
   const modeRef = useRef<'move' | 'pinch'>('move');
@@ -108,18 +113,27 @@ export function DraggableText({
     modeRef.current = 'pinch';
     movedRef.current = true;
     pinchStartDistRef.current = touchDistance(touches);
-    pinchStartScaleRef.current = layerRef.current.scale;
+    pinchStartScaleRef.current = liveRef.current.scale;
     pinchStartAngleRef.current = touchAngle(touches);
-    pinchStartRotationRef.current = layerRef.current.rotation;
+    pinchStartRotationRef.current = liveRef.current.rotation;
   };
 
   const applyPinch = (touches: NativeTouchEvent[]) => {
     const dist = touchDistance(touches);
-    onScaleRef.current(
-      clampStickerScale(pinchStartScaleRef.current * (dist / Math.max(pinchStartDistRef.current, 1))),
-    );
     const angleDelta = shortestAngleDelta(pinchStartAngleRef.current, touchAngle(touches));
-    onRotateRef.current(normalizeRotation(pinchStartRotationRef.current + angleDelta));
+    patchLive({
+      scale: clampStickerScale(
+        pinchStartScaleRef.current * (dist / Math.max(pinchStartDistRef.current, 1)),
+      ),
+      rotation: normalizeRotation(pinchStartRotationRef.current + angleDelta),
+    });
+  };
+
+  const commitLive = () => {
+    const final = endDrag();
+    onMoveRef.current(final.x, final.y);
+    onScaleRef.current(final.scale);
+    onRotateRef.current(final.rotation);
   };
 
   const panResponder = useRef(
@@ -134,6 +148,7 @@ export function DraggableText({
         const { touches, pageX, pageY } = event.nativeEvent;
         lastPageRef.current = { x: pageX, y: pageY };
         movedRef.current = false;
+        beginDrag();
         onDragChangeRef.current?.(true);
         onDragPointerRef.current?.(pageX, pageY);
         onSelectRef.current();
@@ -170,15 +185,17 @@ export function DraggableText({
         }
         lastPageRef.current = { x: pageX, y: pageY };
 
-        const nextX = Math.min(0.92, Math.max(0.08, layerRef.current.x + dx));
-        const nextY = Math.min(0.92, Math.max(0.08, layerRef.current.y + dy));
-        onMoveRef.current(nextX, nextY);
+        patchLive({
+          x: Math.min(0.92, Math.max(0.08, liveRef.current.x + dx)),
+          y: Math.min(0.92, Math.max(0.08, liveRef.current.y + dy)),
+        });
       },
       onPanResponderRelease: (event) => {
         const { pageX, pageY } = event.nativeEvent;
         const wasSelected = selectedRef.current;
         const didMove = movedRef.current;
         modeRef.current = 'move';
+        commitLive();
         onDragPointerRef.current?.(pageX, pageY);
         onDragEndRef.current?.(pageX, pageY);
         onDragChangeRef.current?.(false);
@@ -189,6 +206,7 @@ export function DraggableText({
       onPanResponderTerminate: (event) => {
         const { pageX, pageY } = event.nativeEvent;
         modeRef.current = 'move';
+        commitLive();
         if (typeof pageX === 'number' && typeof pageY === 'number') {
           onDragPointerRef.current?.(pageX, pageY);
           onDragEndRef.current?.(pageX, pageY);
@@ -215,11 +233,11 @@ export function DraggableText({
       style={[
         styles.hit,
         {
-          left: `${layer.x * 100}%` as unknown as number,
-          top: `${layer.y * 100}%` as unknown as number,
+          left: `${live.x * 100}%` as unknown as number,
+          top: `${live.y * 100}%` as unknown as number,
           marginLeft: -box.width / 2,
           marginTop: -box.height / 2,
-          transform: [{ scale: layer.scale }, { rotate: `${layer.rotation}deg` }],
+          transform: [{ scale: live.scale }, { rotate: `${live.rotation}deg` }],
         },
       ]}
     >

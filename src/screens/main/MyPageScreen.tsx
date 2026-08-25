@@ -128,12 +128,15 @@ export function MyPageScreen({ navigation }: Props) {
         concurrency: 3,
         priorityIds: likedItems.slice(0, 6).map((item) => item.id),
         isCancelled: () => likedRequestRef.current !== requestId,
-        onCardEnriched: (enriched) => {
-          setLikedCards((prev) =>
-            prev.map((card) =>
-              card.id === enriched.id ? mergeFeedCardMedia(enriched, card) : card,
-            ),
-          );
+        onCardsEnriched: (enrichedCards) => {
+          if (enrichedCards.length === 0) return;
+          setLikedCards((prev) => {
+            const byId = new Map(enrichedCards.map((card) => [card.id, card]));
+            return prev.map((card) => {
+              const enriched = byId.get(card.id);
+              return enriched ? mergeFeedCardMedia(enriched, card) : card;
+            });
+          });
         },
       });
     } catch {

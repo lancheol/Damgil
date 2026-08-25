@@ -48,6 +48,7 @@ import {
 } from '../types/diary';
 import { normalizeCover } from '../utils/diaryCover';
 import { refreshDiaryCoverPhotoUris } from '../utils/diaryCoverMedia';
+import { createDebounced } from '../utils/debounce';
 import { buildPlaceSelections } from '../utils/diaryPlaces';
 import { isDiaryPublished, toDiaryStatus } from '../utils/tripStatus';
 import { buildPlacePageDecoration, normalizePlacePageDecoration } from '../utils/diaryPageDecoration';
@@ -272,13 +273,24 @@ export function DiaryProvider({ children }: PropsWithChildren) {
     };
   }, [authReady, loadDiaries]);
 
+  const persistDiariesRef = useRef(
+    createDebounced((next: Diary[]) => {
+      void AsyncStorage.setItem(DIARIES_STORAGE_KEY, JSON.stringify(next));
+    }, 700),
+  );
+
   useEffect(() => {
     if (!isReady) {
       return;
     }
-
-    void AsyncStorage.setItem(DIARIES_STORAGE_KEY, JSON.stringify(diaries));
+    persistDiariesRef.current(diaries);
   }, [diaries, isReady]);
+
+  useEffect(() => {
+    return () => {
+      persistDiariesRef.current.flush();
+    };
+  }, []);
 
   const createDiary = useCallback(async (input: CreateDiaryInput) => {
     const tokens = await loadTokens();

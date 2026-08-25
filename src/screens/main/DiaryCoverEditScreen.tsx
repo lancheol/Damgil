@@ -144,6 +144,9 @@ export function DiaryCoverEditScreen({ navigation, route }: Props) {
   const photoById = useMemo(() => indexPhotosById(diary?.photos), [diary?.photos]);
 
   const markDirty = useCallback(() => {
+    if (dirtyRef.current) {
+      return;
+    }
     dirtyRef.current = true;
     setDirty(true);
   }, []);

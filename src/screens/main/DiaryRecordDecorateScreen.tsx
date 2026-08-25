@@ -142,7 +142,13 @@ export function DiaryRecordDecorateScreen({ navigation, route }: Props) {
     };
   }, [diaryId, photoId, loadPhotoDecoration]);
 
-  const markDirty = useCallback(() => setDirty(true), []);
+  const markDirty = useCallback(() => {
+    if (dirtyRef.current) {
+      return;
+    }
+    dirtyRef.current = true;
+    setDirty(true);
+  }, []);
 
   const measureDeleteChip = useCallback(() => {
     const node = deleteChipRef.current;
