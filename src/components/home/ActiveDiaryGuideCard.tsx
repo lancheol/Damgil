@@ -1,8 +1,9 @@
 import { Ionicons } from '@expo/vector-icons';
-import { Pressable, StyleSheet, Text, View } from 'react-native';
+import { Image, Pressable, StyleSheet, Text, View } from 'react-native';
 
 import { Diary } from '../../types/diary';
 import { colors, radii, spacing } from '../../theme';
+import { HomePolaroidFrame, homePolaroidStyles } from './HomePolaroidFrame';
 
 type ActiveDiaryGuideCardProps = {
   diary: Diary;
@@ -17,84 +18,73 @@ export function ActiveDiaryGuideCard({
 }: ActiveDiaryGuideCardProps) {
   const title = diary?.name?.trim() || '나의 여행';
   const place = diary?.place?.trim() || '';
+  const photos = diary?.photos ?? [];
+  const previewUri = photos.length > 0 ? photos[photos.length - 1]?.uri : null;
+  const actionHint =
+    photos.length === 0 ? '눌러서 사진을 촬영합니다' : '눌러서 촬영·종료 메뉴를 엽니다';
 
   return (
-    <View style={styles.stage}>
-      <View style={styles.shadowWrap}>
-        <View style={styles.polaroid}>
-          <Pressable
-            accessibilityRole="button"
-            accessibilityLabel="다이어리 삭제"
-            hitSlop={8}
-            onPress={onPressDelete}
-            style={({ pressed }) => [styles.trashBtn, pressed && styles.trashPressed]}
-          >
-            <Ionicons name="trash-outline" size={18} color="#9CA3AF" />
-          </Pressable>
-
-          <Pressable
-            accessibilityRole="button"
-            accessibilityLabel={`${title} 다이어리`}
-            onPress={onPress}
-            style={({ pressed }) => [styles.photoInset, pressed && styles.pressed]}
-          >
-            <View style={styles.photoWell}>
-              <Ionicons name="camera-outline" size={40} color="#9CA3AF" />
-            </View>
-          </Pressable>
-
-          <Pressable
-            accessibilityRole="button"
-            onPress={onPress}
-            style={styles.captionArea}
-          >
-            <View style={styles.titlePill}>
-              <Text style={styles.titleText} numberOfLines={1}>
-                {title}
-              </Text>
-            </View>
-            {place ? (
-              <Text style={styles.placeText} numberOfLines={1}>
-                {place}
-              </Text>
-            ) : null}
-          </Pressable>
-        </View>
-      </View>
-    </View>
+    <HomePolaroidFrame
+      overlay={
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel="다이어리 삭제"
+          accessibilityHint="이 여행 다이어리를 삭제합니다"
+          hitSlop={8}
+          onPress={onPressDelete}
+          style={({ pressed }) => [styles.trashBtn, pressed && styles.trashPressed]}
+        >
+          <Ionicons name="trash-outline" size={18} color={colors.inkMuted} />
+        </Pressable>
+      }
+      photo={
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel={`${title} 다이어리`}
+          accessibilityHint={actionHint}
+          onPress={onPress}
+          style={({ pressed }) => [
+            homePolaroidStyles.photoWell,
+            pressed && homePolaroidStyles.pressed,
+          ]}
+        >
+          {previewUri ? (
+            <Image
+              source={{ uri: previewUri }}
+              style={styles.previewImage}
+              resizeMode="cover"
+              accessibilityIgnoresInvertColors
+            />
+          ) : (
+            <Ionicons name="camera-outline" size={40} color={colors.inkMuted} />
+          )}
+        </Pressable>
+      }
+      caption={
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel={`${title}${place ? `, ${place}` : ''}`}
+          accessibilityHint={actionHint}
+          onPress={onPress}
+          style={styles.captionHit}
+        >
+          <View style={styles.titlePill}>
+            <Text style={styles.titleText} numberOfLines={1}>
+              {title}
+            </Text>
+          </View>
+          {place ? (
+            <Text style={styles.placeText} numberOfLines={1}>
+              {place}
+            </Text>
+          ) : null}
+        </Pressable>
+      }
+    />
   );
 }
 
 const styles = StyleSheet.create({
-  stage: {
-    flex: 1,
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingHorizontal: 36,
-    paddingVertical: 8,
-  },
-  shadowWrap: {
-    width: '100%',
-    maxWidth: 340,
-    aspectRatio: 0.72,
-    borderRadius: 10,
-    backgroundColor: colors.white,
-    shadowColor: '#000',
-    shadowOpacity: 0.18,
-    shadowRadius: 28,
-    shadowOffset: { width: 0, height: 14 },
-    elevation: 10,
-  },
-  polaroid: {
-    flex: 1,
-    borderRadius: 10,
-    backgroundColor: colors.white,
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: 'rgba(0,0,0,0.06)',
-    overflow: 'hidden',
-    paddingTop: 16,
-    paddingHorizontal: 16,
-  },
   trashBtn: {
     position: 'absolute',
     top: spacing.sm + 2,
@@ -110,25 +100,15 @@ const styles = StyleSheet.create({
   trashPressed: {
     opacity: 0.6,
   },
-  photoInset: {
-    flex: 1,
+  previewImage: {
+    ...StyleSheet.absoluteFill,
   },
-  photoWell: {
-    flex: 1,
-    backgroundColor: '#D8DADF',
-    borderRadius: 2,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  pressed: {
-    opacity: 0.9,
-  },
-  captionArea: {
-    height: 88,
+  captionHit: {
     alignItems: 'center',
     justifyContent: 'center',
     gap: 8,
     paddingHorizontal: 4,
+    alignSelf: 'stretch',
   },
   titlePill: {
     backgroundColor: colors.ink,
@@ -144,7 +124,7 @@ const styles = StyleSheet.create({
     letterSpacing: -0.2,
   },
   placeText: {
-    color: '#9CA3AF',
+    color: colors.inkMuted,
     fontSize: 12,
     fontWeight: '400',
     letterSpacing: 0.2,
