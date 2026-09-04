@@ -1,5 +1,5 @@
 import { Ionicons } from '@expo/vector-icons';
-import { Image, Pressable, StyleSheet, Text, View } from 'react-native';
+import { Image, Pressable, StyleSheet, Text } from 'react-native';
 
 import { Diary } from '../../types/diary';
 import { colors, radii, spacing } from '../../theme';
@@ -68,11 +68,9 @@ export function ActiveDiaryGuideCard({
           onPress={onPress}
           style={styles.captionHit}
         >
-          <View style={styles.titlePill}>
-            <Text style={styles.titleText} numberOfLines={1}>
-              {title}
-            </Text>
-          </View>
+          <Text style={styles.titleText} numberOfLines={1}>
+            {title}
+          </Text>
           {place ? (
             <Text style={styles.placeText} numberOfLines={1}>
               {place}
@@ -106,27 +104,24 @@ const styles = StyleSheet.create({
   captionHit: {
     alignItems: 'center',
     justifyContent: 'center',
-    gap: 8,
-    paddingHorizontal: 4,
+    gap: 6,
+    paddingHorizontal: 8,
     alignSelf: 'stretch',
   },
-  titlePill: {
-    backgroundColor: colors.ink,
-    borderRadius: 8,
-    paddingHorizontal: 18,
-    paddingVertical: 8,
-    maxWidth: '100%',
-  },
   titleText: {
-    color: colors.white,
-    fontSize: 15,
+    color: colors.ink,
+    fontSize: 16,
     fontWeight: '700',
     letterSpacing: -0.2,
+    maxWidth: '100%',
+    textAlign: 'center',
   },
   placeText: {
     color: colors.inkMuted,
-    fontSize: 12,
+    fontSize: 13,
     fontWeight: '400',
     letterSpacing: 0.2,
+    maxWidth: '100%',
+    textAlign: 'center',
   },
 });
