@@ -2,6 +2,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { Pressable, StyleSheet, View } from 'react-native';
 
 import { colors, radii } from '../../theme';
+import { HomePolaroidFrame, homePolaroidStyles } from './HomePolaroidFrame';
 
 type EmptyDiaryCardProps = {
   onPressCreate: () => void;
@@ -9,69 +10,29 @@ type EmptyDiaryCardProps = {
 
 export function EmptyDiaryCard({ onPressCreate }: EmptyDiaryCardProps) {
   return (
-    <View style={styles.stage}>
-      <View style={styles.shadowWrap}>
-        <View style={styles.polaroid}>
-          <View style={styles.photoInset}>
-            <Pressable
-              accessibilityRole="button"
-              accessibilityLabel="새 다이어리 만들기"
-              onPress={onPressCreate}
-              style={({ pressed }) => [styles.photoWell, pressed && styles.pressed]}
-            >
-              <View style={styles.plusHit}>
-                <Ionicons name="add" size={36} color="#8B9099" />
-              </View>
-            </Pressable>
+    <HomePolaroidFrame
+      photo={
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel="새 다이어리 만들기"
+          accessibilityHint="여행 다이어리를 새로 만듭니다"
+          onPress={onPressCreate}
+          style={({ pressed }) => [
+            homePolaroidStyles.photoWell,
+            pressed && homePolaroidStyles.pressed,
+          ]}
+        >
+          <View style={styles.plusHit}>
+            <Ionicons name="add" size={36} color={colors.inkMuted} />
           </View>
-
-          <View style={styles.captionArea} />
-        </View>
-      </View>
-    </View>
+        </Pressable>
+      }
+      caption={null}
+    />
   );
 }
 
 const styles = StyleSheet.create({
-  stage: {
-    flex: 1,
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingHorizontal: 36,
-    paddingVertical: 8,
-  },
-  shadowWrap: {
-    width: '100%',
-    maxWidth: 340,
-    aspectRatio: 0.72,
-    borderRadius: 10,
-    backgroundColor: colors.white,
-    shadowColor: '#000',
-    shadowOpacity: 0.18,
-    shadowRadius: 28,
-    shadowOffset: { width: 0, height: 14 },
-    elevation: 10,
-  },
-  polaroid: {
-    flex: 1,
-    borderRadius: 10,
-    backgroundColor: colors.white,
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: 'rgba(0,0,0,0.06)',
-    overflow: 'hidden',
-    paddingTop: 16,
-    paddingHorizontal: 16,
-  },
-  photoInset: {
-    flex: 1,
-  },
-  photoWell: {
-    flex: 1,
-    backgroundColor: '#D8DADF',
-    borderRadius: 2,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
   plusHit: {
     width: 64,
     height: 64,
@@ -81,11 +42,5 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(255,255,255,0.72)',
     borderWidth: StyleSheet.hairlineWidth,
     borderColor: 'rgba(0,0,0,0.06)',
-  },
-  pressed: {
-    opacity: 0.88,
-  },
-  captionArea: {
-    height: 88,
   },
 });
