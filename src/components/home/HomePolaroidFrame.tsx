@@ -49,8 +49,7 @@ const styles = StyleSheet.create({
   shadowWrap: {
     width: '100%',
     maxWidth: 360,
-    // 세로로 더 길게 (값이 작을수록 키가 커짐)
-    aspectRatio: 0.58,
+    aspectRatio: 0.66,
     borderRadius: 10,
     backgroundColor: colors.white,
     shadowColor: colors.black,
