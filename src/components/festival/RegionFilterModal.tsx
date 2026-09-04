@@ -1,6 +1,7 @@
 import { Ionicons } from '@expo/vector-icons';
 import { useEffect, useState } from 'react';
 import {
+  ActivityIndicator,
   Modal,
   Platform,
   Pressable,
@@ -11,9 +12,10 @@ import {
 } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import { REGION_AREAS } from '../../constants/festivals';
+import type { RegionFilterSidoDto } from '../../api/types';
 import { RegionSelection, regionSelectionKey } from '../../types/festival';
 import { colors } from '../../theme';
+import { loadRegionFilterTree } from '../../utils/regionFilters';
 
 const REGION_COLUMN_WIDTH = 84;
 const GRID_PADDING = 16;
@@ -30,17 +32,51 @@ type Props = {
 export function RegionFilterModal({ visible, selection, onClose, onApply }: Props) {
   const insets = useSafeAreaInsets();
   const [gridWidth, setGridWidth] = useState(0);
-  const [activeRegion, setActiveRegion] = useState(REGION_AREAS[0].region);
+  const [areas, setAreas] = useState<RegionFilterSidoDto[]>([]);
+  const [areasLoading, setAreasLoading] = useState(false);
+  const [areasError, setAreasError] = useState(false);
+  const [activeSidoId, setActiveSidoId] = useState('');
   const [draft, setDraft] = useState<RegionSelection[]>(selection);
 
   useEffect(() => {
-    if (visible) {
-      setDraft(selection);
-      setActiveRegion(selection[0]?.region ?? REGION_AREAS[0].region);
-    }
-  }, [visible, selection]);
+    if (!visible) return;
 
-  const districts = REGION_AREAS.find((area) => area.region === activeRegion)?.districts ?? [];
+    let cancelled = false;
+    setAreasLoading(true);
+    setAreasError(false);
+    void loadRegionFilterTree()
+      .then((items) => {
+        if (cancelled) return;
+        setAreas(items);
+      })
+      .catch(() => {
+        if (cancelled) return;
+        setAreas([]);
+        setAreasError(true);
+      })
+      .finally(() => {
+        if (!cancelled) setAreasLoading(false);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [visible]);
+
+  useEffect(() => {
+    if (!visible) return;
+    setDraft(selection);
+    if (selection[0]?.sidoId) {
+      setActiveSidoId(selection[0].sidoId);
+      return;
+    }
+    if (areas[0]?.id) {
+      setActiveSidoId(areas[0].id);
+    }
+  }, [areas, selection, visible]);
+
+  const activeSido = areas.find((area) => area.id === activeSidoId) ?? areas[0] ?? null;
+  const districts = activeSido?.children ?? [];
 
   const toggle = (item: RegionSelection) => {
     const key = regionSelectionKey(item);
@@ -51,8 +87,8 @@ export function RegionFilterModal({ visible, selection, onClose, onApply }: Prop
     );
   };
 
-  const countByRegion = (region: string) =>
-    draft.filter((entry) => entry.region === region).length;
+  const countBySido = (sidoId: string) =>
+    draft.filter((entry) => entry.sidoId === sidoId).length;
 
   const districtWidth =
     (gridWidth - GRID_PADDING * 2 - GRID_GAP * (GRID_COLUMNS - 1)) / GRID_COLUMNS;
@@ -90,69 +126,104 @@ export function RegionFilterModal({ visible, selection, onClose, onApply }: Prop
         </View>
 
         <View style={styles.body}>
-          <ScrollView style={styles.regionColumn} showsVerticalScrollIndicator={false}>
-            {REGION_AREAS.map((area) => {
-              const active = area.region === activeRegion;
-              const count = countByRegion(area.region);
-              return (
-                <Pressable
-                  key={area.region}
-                  accessibilityRole="button"
-                  accessibilityState={{ selected: active }}
-                  onPress={() => setActiveRegion(area.region)}
-                  style={({ pressed }) => [
-                    styles.regionItem,
-                    active && styles.regionItemActive,
-                    pressed && styles.pressed,
-                  ]}
-                >
-                  <Text style={[styles.regionText, active && styles.regionTextActive]}>
-                    {area.region}
-                  </Text>
-                  {count > 0 ? (
-                    <View style={styles.regionCount}>
-                      <Text style={styles.regionCountText}>{count}</Text>
-                    </View>
-                  ) : null}
-                </Pressable>
-              );
-            })}
-          </ScrollView>
+          {areasLoading ? (
+            <View style={styles.stateWrap}>
+              <ActivityIndicator color={colors.ink} />
+            </View>
+          ) : areasError ? (
+            <View style={styles.stateWrap}>
+              <Text style={styles.stateText}>지역 목록을 불러오지 못했어요.</Text>
+              <Pressable
+                accessibilityRole="button"
+                onPress={() => {
+                  setAreasLoading(true);
+                  setAreasError(false);
+                  void loadRegionFilterTree(true)
+                    .then((items) => setAreas(items))
+                    .catch(() => {
+                      setAreas([]);
+                      setAreasError(true);
+                    })
+                    .finally(() => setAreasLoading(false));
+                }}
+                style={({ pressed }) => [styles.retryButton, pressed && styles.pressed]}
+              >
+                <Text style={styles.retryText}>다시 시도</Text>
+              </Pressable>
+            </View>
+          ) : (
+            <>
+              <ScrollView style={styles.regionColumn} showsVerticalScrollIndicator={false}>
+                {areas.map((area) => {
+                  const active = area.id === activeSido?.id;
+                  const count = countBySido(area.id);
+                  return (
+                    <Pressable
+                      key={area.id}
+                      accessibilityRole="button"
+                      accessibilityState={{ selected: active }}
+                      onPress={() => setActiveSidoId(area.id)}
+                      style={({ pressed }) => [
+                        styles.regionItem,
+                        active && styles.regionItemActive,
+                        pressed && styles.pressed,
+                      ]}
+                    >
+                      <Text style={[styles.regionText, active && styles.regionTextActive]}>
+                        {area.name}
+                      </Text>
+                      {count > 0 ? (
+                        <View style={styles.regionCount}>
+                          <Text style={styles.regionCountText}>{count}</Text>
+                        </View>
+                      ) : null}
+                    </Pressable>
+                  );
+                })}
+              </ScrollView>
 
-          <ScrollView
-            style={styles.districtColumn}
-            contentContainerStyle={styles.districtGrid}
-            showsVerticalScrollIndicator={false}
-            onLayout={(event) => setGridWidth(event.nativeEvent.layout.width)}
-          >
-            {(districtWidth > 0 ? districts : []).map((district) => {
-              const item = { region: activeRegion, district };
-              const selected = draft.some(
-                (entry) => regionSelectionKey(entry) === regionSelectionKey(item),
-              );
-              return (
-                <Pressable
-                  key={district}
-                  accessibilityRole="button"
-                  accessibilityState={{ selected }}
-                  onPress={() => toggle(item)}
-                  style={({ pressed }) => [
-                    styles.districtChip,
-                    { width: districtWidth },
-                    selected && styles.districtChipSelected,
-                    pressed && styles.pressed,
-                  ]}
-                >
-                  <Text
-                    numberOfLines={2}
-                    style={[styles.districtText, selected && styles.districtTextSelected]}
-                  >
-                    {district}
-                  </Text>
-                </Pressable>
-              );
-            })}
-          </ScrollView>
+              <ScrollView
+                style={styles.districtColumn}
+                contentContainerStyle={styles.districtGrid}
+                showsVerticalScrollIndicator={false}
+                onLayout={(event) => setGridWidth(event.nativeEvent.layout.width)}
+              >
+                {(gridWidth > 0 ? districts : []).map((district) => {
+                  if (!activeSido) return null;
+                  const item: RegionSelection = {
+                    sidoId: activeSido.id,
+                    regionId: district.id,
+                    region: activeSido.name,
+                    district: district.name,
+                  };
+                  const selected = draft.some(
+                    (entry) => regionSelectionKey(entry) === regionSelectionKey(item),
+                  );
+                  return (
+                    <Pressable
+                      key={district.id}
+                      accessibilityRole="button"
+                      accessibilityState={{ selected }}
+                      onPress={() => toggle(item)}
+                      style={({ pressed }) => [
+                        styles.districtChip,
+                        { width: districtWidth },
+                        selected && styles.districtChipSelected,
+                        pressed && styles.pressed,
+                      ]}
+                    >
+                      <Text
+                        numberOfLines={2}
+                        style={[styles.districtText, selected && styles.districtTextSelected]}
+                      >
+                        {district.name}
+                      </Text>
+                    </Pressable>
+                  );
+                })}
+              </ScrollView>
+            </>
+          )}
         </View>
 
         <View style={styles.footer}>
@@ -236,6 +307,30 @@ const styles = StyleSheet.create({
   body: {
     flex: 1,
     flexDirection: 'row',
+  },
+  stateWrap: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 24,
+    gap: 12,
+  },
+  stateText: {
+    fontSize: 13,
+    lineHeight: 18,
+    color: '#99A1AF',
+    textAlign: 'center',
+  },
+  retryButton: {
+    paddingHorizontal: 16,
+    paddingVertical: 9,
+    borderRadius: 999,
+    backgroundColor: colors.ink,
+  },
+  retryText: {
+    color: colors.white,
+    fontSize: 12,
+    fontWeight: '700',
   },
   regionColumn: {
     width: REGION_COLUMN_WIDTH,

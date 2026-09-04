@@ -57,11 +57,15 @@ export function FloatingTabBar({ state, navigation, descriptors }: BottomTabBarP
     return null;
   }
 
+  const routeIndexByName = new Map(
+    state.routes.map((route, index) => [route.name as keyof MainTabParamList, index]),
+  );
+
   return (
     <View style={[styles.wrap, { paddingBottom: Math.max(insets.bottom, spacing.sm) }]}>
       <View style={styles.bar}>
         {TABS.map((tab) => {
-          const routeIndex = state.routes.findIndex((route) => route.name === tab.routeName);
+          const routeIndex = routeIndexByName.get(tab.routeName) ?? -1;
           const isFocused = routeIndex >= 0 && state.index === routeIndex;
           const color = isFocused ? colors.accent : colors.inkMuted;
           const route = state.routes[routeIndex];
@@ -113,6 +117,8 @@ const styles = StyleSheet.create({
     bottom: 0,
     alignItems: 'center',
     paddingHorizontal: spacing.lg,
+    zIndex: 100,
+    elevation: 24,
   },
   bar: {
     width: '100%',
@@ -128,7 +134,7 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.14,
     shadowRadius: 16,
     shadowOffset: { width: 0, height: 6 },
-    elevation: 8,
+    elevation: 24,
   },
   item: {
     flex: 1,

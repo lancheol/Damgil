@@ -33,14 +33,11 @@ import { RootStackParamList } from '../../navigation/types';
 import {
   DecorFontId,
   DecorPhotoLayer,
-  DecorSticker,
   DecorTextLayer,
   DiaryPlaceSelection,
 } from '../../types/diary';
 import {
-  createStickerId,
   DECOR_FONTS,
-  DECOR_STICKER_EMOJIS,
   DECOR_TEXT_COLORS,
   DEFAULT_DECOR_TEXT_COLOR,
 } from '../../utils/decorAssets';
@@ -65,7 +62,7 @@ import { isDiaryPublished } from '../../utils/tripStatus';
 import { colors, radii, spacing, typography } from '../../theme';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'DiaryEdit'>;
-type ToolSheet = 'none' | 'sticker' | 'text';
+type ToolSheet = 'none' | 'text';
 
 type HitRect = { x: number; y: number; width: number; height: number };
 
@@ -220,10 +217,8 @@ export function DiaryEditScreen({ navigation, route }: Props) {
   );
 
   const [photos, setPhotos] = useState<DecorPhotoLayer[]>([]);
-  const [stickers, setStickers] = useState<DecorSticker[]>([]);
   const [texts, setTexts] = useState<DecorTextLayer[]>([]);
   const [selectedPhotoId, setSelectedPhotoId] = useState<string | null>(null);
-  const [selectedStickerId, setSelectedStickerId] = useState<string | null>(null);
   const [selectedTextId, setSelectedTextId] = useState<string | null>(null);
   const [draggingLayer, setDraggingLayer] = useState(false);
   const [trashHot, setTrashHot] = useState(false);
@@ -242,12 +237,10 @@ export function DiaryEditScreen({ navigation, route }: Props) {
   const loadedPlaceIdRef = useRef<string | null>(null);
   const loadedDecorationKeyRef = useRef<string | null>(null);
   const photosRef = useRef(photos);
-  const stickersRef = useRef(stickers);
   const textsRef = useRef(texts);
   const dirtyRef = useRef(dirty);
   const activePlaceRef = useRef(activePlace);
   photosRef.current = photos;
-  stickersRef.current = stickers;
   textsRef.current = texts;
   dirtyRef.current = dirty;
   activePlaceRef.current = activePlace;
@@ -270,7 +263,6 @@ export function DiaryEditScreen({ navigation, route }: Props) {
       placeId: place.id,
       decoration: buildPlacePageDecoration({
         photos: photosRef.current,
-        stickers: stickersRef.current,
         texts: textsRef.current,
       }),
     });
@@ -320,7 +312,6 @@ export function DiaryEditScreen({ navigation, route }: Props) {
   useEffect(() => {
     if (!activePlace) {
       setPhotos([]);
-      setStickers([]);
       setTexts([]);
       loadedPlaceIdRef.current = null;
       loadedDecorationKeyRef.current = null;
@@ -347,10 +338,8 @@ export function DiaryEditScreen({ navigation, route }: Props) {
       activePlace.photoIds,
     );
     setPhotos(next.photos);
-    setStickers(next.stickers);
     setTexts(next.texts);
     setSelectedPhotoId(next.photos[0]?.id ?? null);
-    setSelectedStickerId(null);
     setSelectedTextId(null);
     dirtyRef.current = false;
     setDirty(false);
@@ -420,7 +409,6 @@ export function DiaryEditScreen({ navigation, route }: Props) {
 
   const clearSelection = () => {
     setSelectedPhotoId(null);
-    setSelectedStickerId(null);
     setSelectedTextId(null);
   };
 
@@ -435,7 +423,6 @@ export function DiaryEditScreen({ navigation, route }: Props) {
     });
     setPhotos((prev) => [...prev, layer]);
     setSelectedPhotoId(layer.id);
-    setSelectedStickerId(null);
     setSelectedTextId(null);
     markDirty();
   };
@@ -507,7 +494,6 @@ export function DiaryEditScreen({ navigation, route }: Props) {
       return;
     }
     setSelectedPhotoId(null);
-    setSelectedStickerId(null);
     setSelectedTextId(id);
     setEditingTextId(id);
     setDraftText(target.content);
@@ -551,25 +537,9 @@ export function DiaryEditScreen({ navigation, route }: Props) {
     markDirty();
   };
 
-  const addSticker = (emoji: string) => {
-    const sticker: DecorSticker = {
-      id: createStickerId('page'),
-      emoji,
-      x: 0.22,
-      y: 0.28,
-      scale: 1,
-      rotation: 0,
-    };
-    setStickers((prev) => [...prev, sticker]);
-    setSelectedStickerId(sticker.id);
-    setSelectedPhotoId(null);
-    setSelectedTextId(null);
-    setSheet('none');
-    markDirty();
-  };
 
   const finishDelete = (
-    type: 'photo' | 'sticker' | 'text',
+    type: 'photo' | 'text',
     id: string,
     shouldDelete: boolean,
   ) => {
@@ -579,14 +549,6 @@ export function DiaryEditScreen({ navigation, route }: Props) {
       return;
     }
 
-    if (type === 'sticker') {
-      setStickers((prev) => prev.filter((item) => item.id !== id));
-      setSelectedStickerId(null);
-      markDirty();
-      setTrashHotState(false);
-      setDraggingLayer(false);
-      return;
-    }
 
     if (type === 'text') {
       setTexts((prev) => prev.filter((item) => item.id !== id));
@@ -652,7 +614,7 @@ export function DiaryEditScreen({ navigation, route }: Props) {
   };
 
   const handleDragEnd = (
-    type: 'photo' | 'sticker' | 'text',
+    type: 'photo' | 'text',
     id: string,
     pageX?: number,
     pageY?: number,
@@ -945,10 +907,8 @@ export function DiaryEditScreen({ navigation, route }: Props) {
                   )}
                   photos={viewCover.photos ?? []}
                   photoById={photoById}
-                  stickers={viewCover.stickers ?? []}
                   texts={viewCover.texts ?? []}
                   selectedPhotoId={null}
-                  selectedStickerId={null}
                   selectedTextId={null}
                 />
               ) : (
@@ -956,10 +916,8 @@ export function DiaryEditScreen({ navigation, route }: Props) {
                 style={styles.pageCanvas}
                 photos={photos}
                 photoById={photoById}
-                stickers={stickers}
                 texts={texts}
                 selectedPhotoId={readOnly ? null : selectedPhotoId}
-                selectedStickerId={readOnly ? null : selectedStickerId}
                 selectedTextId={readOnly ? null : selectedTextId}
                 onBackgroundPress={readOnly ? undefined : clearSelection}
                 onSelectPhoto={
@@ -967,16 +925,6 @@ export function DiaryEditScreen({ navigation, route }: Props) {
                     ? undefined
                     : (id) => {
                         setSelectedPhotoId(id);
-                        setSelectedStickerId(null);
-                        setSelectedTextId(null);
-                      }
-                }
-                onSelectSticker={
-                  readOnly
-                    ? undefined
-                    : (id) => {
-                        setSelectedStickerId(id);
-                        setSelectedPhotoId(null);
                         setSelectedTextId(null);
                       }
                 }
@@ -986,7 +934,6 @@ export function DiaryEditScreen({ navigation, route }: Props) {
                     : (id) => {
                         setSelectedTextId(id);
                         setSelectedPhotoId(null);
-                        setSelectedStickerId(null);
                       }
                 }
                 onEditText={readOnly ? undefined : openEditText}
@@ -1013,36 +960,6 @@ export function DiaryEditScreen({ navigation, route }: Props) {
                     ? undefined
                     : (id, rotation) => {
                         setPhotos((prev) =>
-                          prev.map((item) => (item.id === id ? { ...item, rotation } : item)),
-                        );
-                        markDirty();
-                      }
-                }
-                onMoveSticker={
-                  readOnly
-                    ? undefined
-                    : (id, x, y) => {
-                        setStickers((prev) =>
-                          prev.map((item) => (item.id === id ? { ...item, x, y } : item)),
-                        );
-                        markDirty();
-                      }
-                }
-                onScaleSticker={
-                  readOnly
-                    ? undefined
-                    : (id, scale) => {
-                        setStickers((prev) =>
-                          prev.map((item) => (item.id === id ? { ...item, scale } : item)),
-                        );
-                        markDirty();
-                      }
-                }
-                onRotateSticker={
-                  readOnly
-                    ? undefined
-                    : (id, rotation) => {
-                        setStickers((prev) =>
                           prev.map((item) => (item.id === id ? { ...item, rotation } : item)),
                         );
                         markDirty();
@@ -1103,11 +1020,6 @@ export function DiaryEditScreen({ navigation, route }: Props) {
                   readOnly
                     ? undefined
                     : (id, pageX, pageY) => handleDragEnd('photo', id, pageX, pageY)
-                }
-                onStickerDragEnd={
-                  readOnly
-                    ? undefined
-                    : (id, pageX, pageY) => handleDragEnd('sticker', id, pageX, pageY)
                 }
                 onTextDragEnd={
                   readOnly
@@ -1213,13 +1125,7 @@ export function DiaryEditScreen({ navigation, route }: Props) {
             <Text style={styles.toolAa}>Aa</Text>
             <Text style={styles.toolLabel}>텍스트</Text>
           </Pressable>
-          <Pressable
-            onPress={() => setSheet('sticker')}
-            style={({ pressed }) => [styles.toolItem, pressed && styles.pressed]}
-          >
-            <Ionicons name="happy-outline" size={24} color={colors.ink} />
-            <Text style={styles.toolLabel}>스티커</Text>
-          </Pressable>
+          
         </View>
       </View>
 
@@ -1241,24 +1147,7 @@ export function DiaryEditScreen({ navigation, route }: Props) {
         />
       ) : null}
 
-      <Modal visible={sheet === 'sticker'} transparent animationType="slide" onRequestClose={() => setSheet('none')}>
-        <Pressable style={styles.sheetBackdropClear} onPress={() => setSheet('none')} />
-        <View style={[styles.sheet, { paddingBottom: Math.max(insets.bottom, 16) }]}>
-          <View style={styles.sheetHandle} />
-          <Text style={styles.sheetTitle}>스티커</Text>
-          <ScrollView contentContainerStyle={styles.stickerGrid}>
-            {DECOR_STICKER_EMOJIS.map((emoji) => (
-              <Pressable
-                key={emoji}
-                onPress={() => addSticker(emoji)}
-                style={({ pressed }) => [styles.stickerCell, pressed && styles.pressed]}
-              >
-                <Text style={styles.stickerCellText}>{emoji}</Text>
-              </Pressable>
-            ))}
-          </ScrollView>
-        </View>
-      </Modal>
+      
 
       <Modal
         visible={sheet === 'text'}
@@ -1601,27 +1490,12 @@ const styles = StyleSheet.create({
     marginBottom: spacing.md,
   },
   sheetTitle: { ...typography.label, color: colors.ink, marginBottom: spacing.md },
-  stickerGrid: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: spacing.sm,
-    paddingBottom: spacing.lg,
-  },
-  stickerCell: {
-    width: 52,
-    height: 52,
-    borderRadius: radii.sm,
-    backgroundColor: colors.background,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  stickerCellText: { fontSize: 28 },
   textModalRoot: { flex: 1 },
-  textModalDim: { ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(0,0,0,0.72)' },
+  textModalDim: { ...StyleSheet.absoluteFill, backgroundColor: 'rgba(0,0,0,0.72)' },
   textComposer: { flex: 1, justifyContent: 'center', paddingHorizontal: spacing.xl },
   textField: { minHeight: 120 },
   textInput: { fontSize: 28, fontWeight: '600', textAlign: 'center' },
-  textPreview: { ...StyleSheet.absoluteFillObject },
+  textPreview: { ...StyleSheet.absoluteFill },
   textInputHit: { minHeight: 120 },
   fontBarWrap: {
     backgroundColor: 'rgba(0,0,0,0.35)',

@@ -9,6 +9,12 @@ export const KERIS_KEDU_FONT_FAMILY = {
   line: 'KerisKeduLine',
 } as const;
 
+export const PRETENDARD_FONT_FAMILY = {
+  regular: 'Pretendard',
+  medium: 'PretendardMedium',
+  bold: 'PretendardBold',
+} as const;
+
 export const DECOR_FONT_IDS: DecorFontId[] = [
   'sans',
   'serif',
@@ -19,6 +25,9 @@ export const DECOR_FONT_IDS: DecorFontId[] = [
   'kedu',
   'keduBold',
   'keduLine',
+  'pretendard',
+  'pretendardMedium',
+  'pretendardBold',
 ];
 
 export function isDecorFontId(value: unknown): value is DecorFontId {
@@ -113,34 +122,28 @@ export const DECOR_FONTS: {
       fontFamily: KERIS_KEDU_FONT_FAMILY.line,
     },
   },
+  {
+    id: 'pretendard',
+    label: '프리텐다드',
+    style: {
+      fontFamily: PRETENDARD_FONT_FAMILY.regular,
+    },
+  },
+  {
+    id: 'pretendardMedium',
+    label: '프리텐다드 Medium',
+    style: {
+      fontFamily: PRETENDARD_FONT_FAMILY.medium,
+    },
+  },
+  {
+    id: 'pretendardBold',
+    label: '프리텐다드 Bold',
+    style: {
+      fontFamily: PRETENDARD_FONT_FAMILY.bold,
+    },
+  },
 ];
-
-export const DECOR_STICKER_EMOJIS = [
-  '✈️',
-  '📷',
-  '⭐',
-  '❤️',
-  '🌴',
-  '🗺️',
-  '☀️',
-  '🌙',
-  '🌊',
-  '🏔️',
-  '☕',
-  '🍜',
-  '🌸',
-  '🍀',
-  '📍',
-  '🚗',
-  '🚂',
-  '🎒',
-  '✨',
-  '💫',
-  '🎵',
-  '📝',
-  '🌈',
-  '🔥',
-] as const;
 
 export function getDecorFontStyle(fontId: DecorFontId): TextStyle {
   return DECOR_FONTS.find((font) => font.id === fontId)?.style ?? DECOR_FONTS[0].style;

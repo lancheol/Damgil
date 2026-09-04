@@ -1,18 +1,8 @@
 import { Ionicons } from '@expo/vector-icons';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 
-import { CoverThumb } from '../diary/CoverThumb';
-import { HomeBookShell } from './HomeBookShell';
 import { Diary } from '../../types/diary';
-import { colors, radii, spacing, typography } from '../../theme';
-import { getCoverBackgroundColor, getEffectiveCover } from '../../utils/diaryCover';
-
-const ACTIVE_GUIDE_LINES = [
-  '(a) 다이어리를 눌러 촬영해주세요.',
-  '(b) 촬영된 장소를 확인해주세요.',
-  '(c) 여행 일자별 사진과 위치를 확인해주세요.',
-  '(d) 여행 종료하기를 누르면 촬영물 수정이 불가능해요.',
-] as const;
+import { colors, radii, spacing } from '../../theme';
 
 type ActiveDiaryGuideCardProps = {
   diary: Diary;
@@ -26,132 +16,137 @@ export function ActiveDiaryGuideCard({
   onPressDelete,
 }: ActiveDiaryGuideCardProps) {
   const title = diary?.name?.trim() || '나의 여행';
-  const cover = getEffectiveCover(diary);
-  const coverColor = getCoverBackgroundColor(cover);
-  const hasCoverLayout = Boolean(diary?.cover || diary?.coverDraft);
+  const place = diary?.place?.trim() || '';
 
   return (
-    <HomeBookShell
-      coverColor={hasCoverLayout ? coverColor : undefined}
-      contentStyle={[styles.coverContent, hasCoverLayout && styles.coverFlush]}
-    >
-      <Pressable
-        accessibilityRole="button"
-        accessibilityLabel="다이어리 삭제"
-        hitSlop={8}
-        onPress={onPressDelete}
-        style={({ pressed }) => [styles.trashBtn, pressed && styles.trashPressed]}
-      >
-        <Ionicons name="trash-outline" size={22} color={colors.white} />
-      </Pressable>
+    <View style={styles.stage}>
+      <View style={styles.shadowWrap}>
+        <View style={styles.polaroid}>
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel="다이어리 삭제"
+            hitSlop={8}
+            onPress={onPressDelete}
+            style={({ pressed }) => [styles.trashBtn, pressed && styles.trashPressed]}
+          >
+            <Ionicons name="trash-outline" size={18} color="#9CA3AF" />
+          </Pressable>
 
-      <Pressable
-        accessibilityRole="button"
-        accessibilityLabel={`${title} 다이어리`}
-        onPress={onPress}
-        style={({ pressed }) => [styles.cardHit, pressed && styles.cardPressed]}
-      >
-        {hasCoverLayout ? (
-          <View style={styles.coverPreview}>
-            <CoverThumb diary={diary} />
-          </View>
-        ) : (
-          <View style={styles.paper}>
-            <View style={styles.tape} />
-            <Text style={styles.paperTitle} numberOfLines={2}>
-              {title}
-            </Text>
-            <View style={styles.list}>
-              {ACTIVE_GUIDE_LINES.map((line) => (
-                <Text key={line} style={styles.paperLine}>
-                  {line}
-                </Text>
-              ))}
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel={`${title} 다이어리`}
+            onPress={onPress}
+            style={({ pressed }) => [styles.photoInset, pressed && styles.pressed]}
+          >
+            <View style={styles.photoWell}>
+              <Ionicons name="camera-outline" size={40} color="#9CA3AF" />
             </View>
-          </View>
-        )}
-      </Pressable>
-    </HomeBookShell>
+          </Pressable>
+
+          <Pressable
+            accessibilityRole="button"
+            onPress={onPress}
+            style={styles.captionArea}
+          >
+            <View style={styles.titlePill}>
+              <Text style={styles.titleText} numberOfLines={1}>
+                {title}
+              </Text>
+            </View>
+            {place ? (
+              <Text style={styles.placeText} numberOfLines={1}>
+                {place}
+              </Text>
+            ) : null}
+          </Pressable>
+        </View>
+      </View>
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
-  coverContent: {
-    position: 'relative',
+  stage: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 36,
+    paddingVertical: 8,
   },
-  coverFlush: {
-    paddingHorizontal: 0,
-    paddingTop: 10,
-    paddingBottom: 10,
-    paddingLeft: 0,
-    paddingRight: 14,
+  shadowWrap: {
+    width: '100%',
+    maxWidth: 340,
+    aspectRatio: 0.72,
+    borderRadius: 10,
+    backgroundColor: colors.white,
+    shadowColor: '#000',
+    shadowOpacity: 0.18,
+    shadowRadius: 28,
+    shadowOffset: { width: 0, height: 14 },
+    elevation: 10,
+  },
+  polaroid: {
+    flex: 1,
+    borderRadius: 10,
+    backgroundColor: colors.white,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: 'rgba(0,0,0,0.06)',
+    overflow: 'hidden',
+    paddingTop: 16,
+    paddingHorizontal: 16,
   },
   trashBtn: {
     position: 'absolute',
-    top: -spacing.sm + 15,
-    right: spacing.sm + 15,
+    top: spacing.sm + 2,
+    right: spacing.sm + 2,
     zIndex: 2,
-    width: 40,
-    height: 40,
+    width: 34,
+    height: 34,
     borderRadius: radii.pill,
+    backgroundColor: 'rgba(255,255,255,0.92)',
     alignItems: 'center',
     justifyContent: 'center',
   },
   trashPressed: {
-    opacity: 0.7,
+    opacity: 0.6,
   },
-  cardHit: {
+  photoInset: {
     flex: 1,
+  },
+  photoWell: {
+    flex: 1,
+    backgroundColor: '#D8DADF',
+    borderRadius: 2,
     alignItems: 'center',
     justifyContent: 'center',
   },
-  coverPreview: {
-    flex: 1,
-    alignSelf: 'stretch',
-    overflow: 'hidden',
+  pressed: {
+    opacity: 0.9,
   },
-  cardPressed: {
-    opacity: 0.92,
-    transform: [{ scale: 0.99 }],
+  captionArea: {
+    height: 88,
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    paddingHorizontal: 4,
   },
-  paper: {
-    width: '100%',
-    maxWidth: 280,
-    backgroundColor: colors.white,
-    borderRadius: 4,
-    paddingTop: spacing.xxl,
-    paddingBottom: spacing.xl,
-    paddingHorizontal: spacing.lg,
-    shadowColor: colors.black,
-    shadowOpacity: 0.2,
-    shadowRadius: 12,
-    shadowOffset: { width: 0, height: 6 },
-    elevation: 4,
+  titlePill: {
+    backgroundColor: colors.ink,
+    borderRadius: 8,
+    paddingHorizontal: 18,
+    paddingVertical: 8,
+    maxWidth: '100%',
   },
-  tape: {
-    position: 'absolute',
-    top: -10,
-    alignSelf: 'center',
-    left: '50%',
-    marginLeft: -36,
-    width: 72,
-    height: 22,
-    backgroundColor: colors.tape,
-    borderRadius: 2,
-    opacity: 0.92,
-    transform: [{ rotate: '-2deg' }],
+  titleText: {
+    color: colors.white,
+    fontSize: 15,
+    fontWeight: '700',
+    letterSpacing: -0.2,
   },
-  paperTitle: {
-    ...typography.monoTitle,
-    color: colors.ink,
-    textAlign: 'center',
-    marginBottom: spacing.md,
-  },
-  list: {
-    gap: 6,
-  },
-  paperLine: {
-    ...typography.monoBody,
-    color: colors.inkSoft,
+  placeText: {
+    color: '#9CA3AF',
+    fontSize: 12,
+    fontWeight: '400',
+    letterSpacing: 0.2,
   },
 });

@@ -41,9 +41,16 @@ async function writePrefs(prefs: MapLocationPrefs): Promise<void> {
   }
 }
 
-const debouncedWrite = createDebounced((prefs: MapLocationPrefs) => {
-  void writePrefs(prefs);
-}, PERSIST_DEBOUNCE_MS);
+let debouncedWrite: ReturnType<typeof createDebounced<[MapLocationPrefs]>> | null = null;
+
+function getDebouncedWrite() {
+  if (!debouncedWrite) {
+    debouncedWrite = createDebounced((prefs: MapLocationPrefs) => {
+      void writePrefs(prefs);
+    }, PERSIST_DEBOUNCE_MS);
+  }
+  return debouncedWrite;
+}
 
 export async function loadMapLocationPrefs(): Promise<MapLocationPrefs> {
   try {
@@ -63,9 +70,9 @@ export async function loadMapLocationPrefs(): Promise<MapLocationPrefs> {
 
 /** 메모리 반영은 호출측에서 즉시, 디스크는 디바운스. */
 export async function saveMapLocationPrefs(prefs: MapLocationPrefs): Promise<void> {
-  debouncedWrite(prefs);
+  getDebouncedWrite().schedule(prefs);
 }
 
 export function flushMapLocationPrefs(): void {
-  debouncedWrite.flush();
+  getDebouncedWrite().flush();
 }

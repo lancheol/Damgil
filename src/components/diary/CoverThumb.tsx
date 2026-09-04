@@ -21,16 +21,8 @@ type CoverThumbProps = {
 function CoverThumbComponent({ diary, style }: CoverThumbProps) {
   const cover = getEffectiveCover(diary);
   const photos = useMemo(() => diary?.photos ?? [], [diary?.photos]);
+  const photoById = useMemo(() => indexPhotosById(photos), [photos]);
   const remoteThumb = diary?.coverThumbUrl?.trim() || null;
-
-  // 목록 성능: 원격 썸네일이 있으면 풀 캔버스 대신 Image
-  if (remoteThumb) {
-    return (
-      <View style={[styles.root, style]} pointerEvents="none">
-        <Image source={{ uri: remoteThumb }} style={styles.remoteThumb} resizeMode="cover" />
-      </View>
-    );
-  }
 
   const hasDecoration = hasCoverDecorationLayout(cover);
   const hasLocalCoverVisual =
@@ -44,7 +36,14 @@ function CoverThumbComponent({ diary, style }: CoverThumbProps) {
     (Boolean(cover.backgroundColor?.trim()) &&
       cover.backgroundColor?.trim().toUpperCase() !== '#1A1A1A');
 
-  const photoById = useMemo(() => indexPhotosById(photos), [photos]);
+  // 목록 성능: 원격 썸네일이 있으면 풀 캔버스 대신 Image
+  if (remoteThumb) {
+    return (
+      <View style={[styles.root, style]} pointerEvents="none">
+        <Image source={{ uri: remoteThumb }} style={styles.remoteThumb} resizeMode="cover" />
+      </View>
+    );
+  }
 
   if (!hasLocalCoverVisual) {
     return <View style={[styles.root, style]} pointerEvents="none" />;
@@ -66,17 +65,37 @@ function CoverThumbComponent({ diary, style }: CoverThumbProps) {
         titleColor={resolveCoverTitleColor(cover, getCoverBackgroundColor(cover))}
         photos={cover.photos ?? []}
         photoById={photoById}
-        stickers={cover.stickers ?? []}
         texts={cover.texts ?? []}
         selectedPhotoId={null}
-        selectedStickerId={null}
         selectedTextId={null}
       />
     </View>
   );
 }
 
-export const CoverThumb = memo(CoverThumbComponent);
+function coverThumbPropsEqual(prev: CoverThumbProps, next: CoverThumbProps): boolean {
+  if (prev.style !== next.style || prev.fill !== next.fill) {
+    return false;
+  }
+  const a = prev.diary;
+  const b = next.diary;
+  if (a === b) {
+    return true;
+  }
+  if (!a || !b) {
+    return a === b;
+  }
+  return (
+    a.id === b.id &&
+    a.name === b.name &&
+    a.coverThumbUrl === b.coverThumbUrl &&
+    a.cover === b.cover &&
+    a.coverDraft === b.coverDraft &&
+    a.photos === b.photos
+  );
+}
+
+export const CoverThumb = memo(CoverThumbComponent, coverThumbPropsEqual);
 
 const styles = StyleSheet.create({
   root: {
@@ -84,9 +103,9 @@ const styles = StyleSheet.create({
     overflow: 'hidden',
   },
   canvas: {
-    ...StyleSheet.absoluteFillObject,
+    ...StyleSheet.absoluteFill,
   },
   remoteThumb: {
-    ...StyleSheet.absoluteFillObject,
+    ...StyleSheet.absoluteFill,
   },
 });

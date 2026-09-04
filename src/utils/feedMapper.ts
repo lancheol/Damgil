@@ -28,7 +28,6 @@ export function coverFromStickerLayout(
   layout: Record<string, unknown> | null | undefined,
 ): DiaryCover | null {
   if (!layout && !title) return null;
-  const stickers = Array.isArray(layout?.stickers) ? (layout!.stickers as DiaryCover['stickers']) : [];
   const photos = Array.isArray(layout?.photos) ? (layout!.photos as NonNullable<DiaryCover['photos']>) : [];
   const texts = Array.isArray(layout?.texts) ? (layout!.texts as NonNullable<DiaryCover['texts']>) : [];
   return {
@@ -40,7 +39,7 @@ export function coverFromStickerLayout(
     titleScale: typeof layout?.titleScale === 'number' ? layout.titleScale : 1,
     titleRotation: typeof layout?.titleRotation === 'number' ? layout.titleRotation : 0,
     titleColor: typeof layout?.titleColor === 'string' ? layout.titleColor : undefined,
-    stickers,
+    stickers: [],
     photos,
     texts,
     backgroundColor:
@@ -74,6 +73,7 @@ export function feedCardToDiaryStub(card: FeedDiaryCard): Diary {
   const title = card.title;
   return {
     id: card.id,
+    userId: card.userId,
     name: title,
     place: '',
     createdAt: card.publishedAt ?? new Date().toISOString(),
@@ -116,12 +116,10 @@ export function mergeFeedCardMedia(
   const nextResolved = countResolved(next.photos);
   const prevHasLayout = Boolean(
     prev.cover?.photos?.length ||
-      prev.cover?.stickers?.length ||
       prev.cover?.texts?.length,
   );
   const nextHasLayout = Boolean(
     next.cover?.photos?.length ||
-      next.cover?.stickers?.length ||
       next.cover?.texts?.length,
   );
 
@@ -146,6 +144,7 @@ export function publicTripToDiary(
   const cover = coverFromStickerLayout(title, trip.coverTitleFont, trip.coverStickerLayout);
   const base: Diary = {
     id: trip.id,
+    userId: trip.userId ?? null,
     name: title,
     place: '',
     createdAt: trip.startedAt,

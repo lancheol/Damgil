@@ -1,10 +1,10 @@
 import type {
   DecorPhotoLayer,
-  DecorSticker,
   DecorTextLayer,
   PlacePageDecoration,
 } from '../types/diary';
 import { createStickerId } from './decorAssets';
+import { ensureDecorLayerZIndexes, normalizeDecorLayerBundle } from './decorLayerOrder';
 import { normalizeCropRect } from './diaryTextLayers';
 
 export function createPhotoLayerId(): string {
@@ -23,6 +23,7 @@ export function createDefaultPhotoLayer(
     scale: partial?.scale ?? 0.72,
     rotation: partial?.rotation ?? 0,
     cropRect: partial?.cropRect ?? null,
+    zIndex: partial?.zIndex,
   };
 }
 
@@ -40,13 +41,16 @@ export function normalizePlacePageDecoration(
         scale: typeof item.scale === 'number' ? item.scale : 0.72,
         rotation: typeof item.rotation === 'number' ? item.rotation : 0,
         cropRect: item.cropRect ? normalizeCropRect(item.cropRect) : null,
+        zIndex: typeof item.zIndex === 'number' ? item.zIndex : undefined,
       }))
     : [];
 
-  const stickers: DecorSticker[] = Array.isArray(decoration?.stickers)
-    ? decoration!.stickers
+  const texts: DecorTextLayer[] = Array.isArray(decoration?.texts)
+    ? decoration!.texts.map((item) => ({
+        ...item,
+        zIndex: typeof item.zIndex === 'number' ? item.zIndex : undefined,
+      }))
     : [];
-  const texts: DecorTextLayer[] = Array.isArray(decoration?.texts) ? decoration!.texts : [];
 
   if (photos.length === 0) {
     const ids =
@@ -65,23 +69,29 @@ export function normalizePlacePageDecoration(
     });
   }
 
+  const ensured = ensureDecorLayerZIndexes({ photos, stickers: [], texts });
+
   return {
-    photos,
-    stickers,
-    texts,
+    photos: ensured.photos,
+    stickers: [],
+    texts: ensured.texts,
     updatedAt: decoration?.updatedAt ?? new Date().toISOString(),
   };
 }
 
 export function buildPlacePageDecoration(input: {
   photos: DecorPhotoLayer[];
-  stickers: DecorSticker[];
   texts: DecorTextLayer[];
 }): PlacePageDecoration {
-  return {
+  const normalized = normalizeDecorLayerBundle({
     photos: input.photos,
-    stickers: input.stickers,
+    stickers: [],
     texts: input.texts,
+  });
+  return {
+    photos: normalized.photos,
+    stickers: [],
+    texts: normalized.texts,
     updatedAt: new Date().toISOString(),
   };
 }

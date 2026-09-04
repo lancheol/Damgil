@@ -77,7 +77,8 @@
           "motionPermission": "촬영 방향을 맞추기 위해 기기 모션 접근이 필요합니다."
         }
       ],
-      "expo-video"
+      "expo-video",
+      "expo-status-bar"
     ]
   }
 }

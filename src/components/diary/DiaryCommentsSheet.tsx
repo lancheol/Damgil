@@ -17,8 +17,10 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { addTripComment, deleteComment, listTripComments, updateComment } from '../../api/social';
 import { loadTokens } from '../../api/tokenStorage';
-import { ApiError, CommentDto } from '../../api/types';
+import { ApiError, CommentDto, ReportTargetType } from '../../api/types';
+import { ReportReasonSheet } from '../moderation/ReportReasonSheet';
 import { useAuth } from '../../context/AuthContext';
+import { confirmBlockUser } from '../../utils/moderationActions';
 import { colors, radii, spacing, typography } from '../../theme';
 
 type DiaryCommentsSheetProps = {
@@ -57,6 +59,10 @@ export function DiaryCommentsSheet({
   const [page, setPage] = useState(1);
   const [menuComment, setMenuComment] = useState<CommentDto | null>(null);
   const [editingComment, setEditingComment] = useState<CommentDto | null>(null);
+  const [reportTarget, setReportTarget] = useState<{
+    targetType: ReportTargetType;
+    targetId: string;
+  } | null>(null);
 
   const isEditing = editingComment != null;
 
@@ -238,6 +244,7 @@ export function DiaryCommentsSheet({
               renderItem={({ item }) => {
                 const isMine = user?.id != null && item.userId === user.id;
                 const isActiveEdit = editingComment?.id === item.id;
+                const canModerate = Boolean(item.userId);
                 return (
                   <View style={[styles.commentRow, isActiveEdit && styles.commentRowEditing]}>
                     <View style={styles.commentBody}>
@@ -247,7 +254,7 @@ export function DiaryCommentsSheet({
                       <Text style={styles.body}>{item.body}</Text>
                       <Text style={styles.time}>{formatCommentTime(item.createdAt)}</Text>
                     </View>
-                    {isMine ? (
+                    {canModerate || isMine ? (
                       <Pressable
                         accessibilityRole="button"
                         accessibilityLabel="더보기"
@@ -321,29 +328,77 @@ export function DiaryCommentsSheet({
           <Pressable style={styles.menuBackdrop} onPress={() => setMenuComment(null)}>
             <Pressable style={styles.menuCard} onPress={() => undefined}>
               <Text style={styles.menuTitle}>댓글</Text>
-              <Pressable
-                accessibilityRole="button"
-                onPress={() => {
-                  if (menuComment) startEdit(menuComment);
-                }}
-                style={({ pressed }) => [styles.menuItem, pressed && styles.pressed]}
-              >
-                <Ionicons name="create-outline" size={18} color={colors.ink} />
-                <Text style={styles.menuItemText}>수정</Text>
-              </Pressable>
-              <Pressable
-                accessibilityRole="button"
-                onPress={() => {
-                  if (menuComment) confirmDelete(menuComment);
-                }}
-                style={({ pressed }) => [styles.menuItem, pressed && styles.pressed]}
-              >
-                <Ionicons name="trash-outline" size={18} color={colors.danger} />
-                <Text style={[styles.menuItemText, styles.menuItemDanger]}>삭제</Text>
-              </Pressable>
+              {menuComment &&
+              user?.id != null &&
+              menuComment.userId === user.id ? (
+                <>
+                  <Pressable
+                    accessibilityRole="button"
+                    onPress={() => {
+                      if (menuComment) startEdit(menuComment);
+                    }}
+                    style={({ pressed }) => [styles.menuItem, pressed && styles.pressed]}
+                  >
+                    <Ionicons name="create-outline" size={18} color={colors.ink} />
+                    <Text style={styles.menuItemText}>수정</Text>
+                  </Pressable>
+                  <Pressable
+                    accessibilityRole="button"
+                    onPress={() => {
+                      if (menuComment) confirmDelete(menuComment);
+                    }}
+                    style={({ pressed }) => [styles.menuItem, pressed && styles.pressed]}
+                  >
+                    <Ionicons name="trash-outline" size={18} color={colors.danger} />
+                    <Text style={[styles.menuItemText, styles.menuItemDanger]}>삭제</Text>
+                  </Pressable>
+                </>
+              ) : (
+                <>
+                  <Pressable
+                    accessibilityRole="button"
+                    onPress={() => {
+                      if (!menuComment) return;
+                      const id = menuComment.id;
+                      setMenuComment(null);
+                      setReportTarget({ targetType: 'comment', targetId: id });
+                    }}
+                    style={({ pressed }) => [styles.menuItem, pressed && styles.pressed]}
+                  >
+                    <Ionicons name="flag-outline" size={18} color={colors.ink} />
+                    <Text style={styles.menuItemText}>댓글 신고</Text>
+                  </Pressable>
+                  <Pressable
+                    accessibilityRole="button"
+                    onPress={() => {
+                      if (!menuComment?.userId) return;
+                      const authorId = menuComment.userId;
+                      setMenuComment(null);
+                      confirmBlockUser(authorId, () => {
+                        setComments((prev) =>
+                          prev.filter((item) => item.userId !== authorId),
+                        );
+                      });
+                    }}
+                    style={({ pressed }) => [styles.menuItem, pressed && styles.pressed]}
+                  >
+                    <Ionicons name="hand-left-outline" size={18} color={colors.danger} />
+                    <Text style={[styles.menuItemText, styles.menuItemDanger]}>
+                      작성자 차단
+                    </Text>
+                  </Pressable>
+                </>
+              )}
             </Pressable>
           </Pressable>
         </Modal>
+
+        <ReportReasonSheet
+          visible={reportTarget != null}
+          targetType={reportTarget?.targetType ?? null}
+          targetId={reportTarget?.targetId ?? null}
+          onClose={() => setReportTarget(null)}
+        />
       </KeyboardAvoidingView>
     </Modal>
   );
@@ -355,7 +410,7 @@ const styles = StyleSheet.create({
     justifyContent: 'flex-end',
   },
   backdrop: {
-    ...StyleSheet.absoluteFillObject,
+    ...StyleSheet.absoluteFill,
     backgroundColor: 'transparent',
   },
   sheet: {

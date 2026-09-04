@@ -1,12 +1,18 @@
-/** 마지막 호출만 delay 후 실행. flush()로 즉시 실행, cancel()로 취소. */
+/** 마지막 호출만 delay 후 실행. flush로 즉시 실행, cancel로 취소. */
+export type DebouncedController<TArgs extends unknown[]> = {
+  schedule: (...args: TArgs) => void;
+  flush: () => void;
+  cancel: () => void;
+};
+
 export function createDebounced<TArgs extends unknown[]>(
   fn: (...args: TArgs) => void,
   delayMs: number,
-) {
+): DebouncedController<TArgs> {
   let timer: ReturnType<typeof setTimeout> | null = null;
   let latestArgs: TArgs | null = null;
 
-  const run = (...args: TArgs) => {
+  const schedule = (...args: TArgs) => {
     latestArgs = args;
     if (timer) {
       clearTimeout(timer);
@@ -21,7 +27,7 @@ export function createDebounced<TArgs extends unknown[]>(
     }, delayMs);
   };
 
-  run.flush = () => {
+  const flush = () => {
     if (timer) {
       clearTimeout(timer);
       timer = null;
@@ -33,7 +39,7 @@ export function createDebounced<TArgs extends unknown[]>(
     }
   };
 
-  run.cancel = () => {
+  const cancel = () => {
     if (timer) {
       clearTimeout(timer);
       timer = null;
@@ -41,5 +47,5 @@ export function createDebounced<TArgs extends unknown[]>(
     latestArgs = null;
   };
 
-  return run;
+  return { schedule, flush, cancel };
 }

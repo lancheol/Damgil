@@ -1,7 +1,6 @@
 import { TripItemDecorationDto } from '../api/types';
 import {
   DecorFontId,
-  DecorSticker,
   DecorTextLayer,
   PhotoCropRect,
   PhotoDecoration,
@@ -11,20 +10,6 @@ import { createTextLayer, buildPhotoDecoration } from './diaryTextLayers';
 
 function asFontId(value: unknown): DecorFontId {
   return isDecorFontId(value) ? value : 'sans';
-}
-
-function asStickers(value: unknown): DecorSticker[] {
-  if (!Array.isArray(value)) {
-    return [];
-  }
-  return value.filter((item): item is DecorSticker => {
-    return (
-      !!item &&
-      typeof item === 'object' &&
-      typeof (item as DecorSticker).id === 'string' &&
-      typeof (item as DecorSticker).emoji === 'string'
-    );
-  });
 }
 
 function asTexts(value: unknown): DecorTextLayer[] {
@@ -60,7 +45,6 @@ function asCropRect(value: unknown): PhotoCropRect | null {
 /** GET decoration 응답 → 로컬 PhotoDecoration */
 export function photoDecorationFromItemDto(dto: TripItemDecorationDto): PhotoDecoration {
   const layout = dto.stickerLayout ?? {};
-  let stickers = asStickers(layout.stickers);
   let texts = asTexts(layout.texts).map((item) => ({
     ...item,
     fontId: asFontId(item.fontId),
@@ -76,7 +60,7 @@ export function photoDecorationFromItemDto(dto: TripItemDecorationDto): PhotoDec
     ];
   }
 
-  const built = buildPhotoDecoration({ stickers, texts, cropRect });
+  const built = buildPhotoDecoration({ texts, cropRect });
   return {
     ...built,
     updatedAt: dto.updatedAt || built.updatedAt,

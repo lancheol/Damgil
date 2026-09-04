@@ -3,15 +3,15 @@ import { Pressable, StyleSheet, View, ViewStyle } from 'react-native';
 
 import { DraggableCoverTitle } from './DraggableCoverTitle';
 import { DraggablePhoto } from './DraggablePhoto';
-import { DraggableSticker, useCanvasPinchHandlers } from './DraggableSticker';
+import { useCanvasPinchHandlers } from './canvasPinchHandlers';
 import { DraggableText } from './DraggableText';
 import {
   CoverFontId,
   DecorPhotoLayer,
-  DecorSticker,
   DecorTextLayer,
   DiaryPhoto,
 } from '../../types/diary';
+import { sortDecorLayersForRender } from '../../utils/decorLayerOrder';
 import {
   COVER_TITLE_LAYER_ID,
   DEFAULT_COVER_COLOR,
@@ -35,10 +35,8 @@ type CoverCanvasProps = {
   titleColor?: string;
   photos: DecorPhotoLayer[];
   photoById: Record<string, DiaryPhoto | undefined>;
-  stickers: DecorSticker[];
   texts: DecorTextLayer[];
   selectedPhotoId: string | null;
-  selectedStickerId: string | null;
   selectedTextId: string | null;
   selectedTitle?: boolean;
   /** 책 껍데기 안에서 꽉 채울 때 */
@@ -47,7 +45,6 @@ type CoverCanvasProps = {
   style?: ViewStyle;
   onBackgroundPress?: () => void;
   onSelectPhoto?: (id: string) => void;
-  onSelectSticker?: (id: string) => void;
   onSelectText?: (id: string) => void;
   onSelectTitle?: () => void;
   onEditTitle?: () => void;
@@ -58,16 +55,12 @@ type CoverCanvasProps = {
   onMovePhoto?: (id: string, x: number, y: number) => void;
   onScalePhoto?: (id: string, scale: number) => void;
   onRotatePhoto?: (id: string, rotation: number) => void;
-  onMoveSticker?: (id: string, x: number, y: number) => void;
-  onScaleSticker?: (id: string, scale: number) => void;
-  onRotateSticker?: (id: string, rotation: number) => void;
   onMoveText?: (id: string, x: number, y: number) => void;
   onScaleText?: (id: string, scale: number) => void;
   onRotateText?: (id: string, rotation: number) => void;
   onLayerDragChange?: (dragging: boolean) => void;
   onLayerDragPointer?: (pageX: number, pageY: number) => void;
   onPhotoDragEnd?: (id: string, pageX?: number, pageY?: number) => void;
-  onStickerDragEnd?: (id: string, pageX?: number, pageY?: number) => void;
   onTextDragEnd?: (id: string, pageX?: number, pageY?: number) => void;
   onTitleDragChange?: (dragging: boolean) => void;
   onTitleDragPointer?: (pageX: number, pageY: number) => void;
@@ -85,10 +78,8 @@ export function CoverCanvas({
   titleColor,
   photos = [],
   photoById,
-  stickers = [],
   texts = [],
   selectedPhotoId,
-  selectedStickerId,
   selectedTextId,
   selectedTitle = false,
   fill = false,
@@ -96,7 +87,6 @@ export function CoverCanvas({
   style,
   onBackgroundPress,
   onSelectPhoto,
-  onSelectSticker,
   onSelectText,
   onSelectTitle,
   onEditTitle,
@@ -107,16 +97,12 @@ export function CoverCanvas({
   onMovePhoto,
   onScalePhoto,
   onRotatePhoto,
-  onMoveSticker,
-  onScaleSticker,
-  onRotateSticker,
   onMoveText,
   onScaleText,
   onRotateText,
   onLayerDragChange,
   onLayerDragPointer,
   onPhotoDragEnd,
-  onStickerDragEnd,
   onTextDragEnd,
   onTitleDragChange,
   onTitleDragPointer,
@@ -128,10 +114,8 @@ export function CoverCanvas({
     canvasSize.width > 0 ? canvasSize.width : estimateCoverEditCanvasWidth(),
   );
   const photosRef = useRef(photos);
-  const stickersRef = useRef(stickers);
   const textsRef = useRef(texts);
   photosRef.current = photos;
-  stickersRef.current = stickers;
   textsRef.current = texts;
 
   const resolvedTitleColor =
@@ -143,11 +127,12 @@ export function CoverCanvas({
 
   const selectedLayerId = selectedTitle
     ? COVER_TITLE_LAYER_ID
-    : selectedTextId ?? selectedStickerId ?? selectedPhotoId;
+    : selectedTextId ?? selectedPhotoId;
+  const sortedLayers = sortDecorLayersForRender({ photos, texts, stickers: [] });
 
   const pinchHandlers = useCanvasPinchHandlers({
     enabled: editable,
-    selectedStickerId: selectedLayerId,
+    selectedLayerId: selectedLayerId,
     getSelectedTransform: () => {
       if (selectedLayerId === COVER_TITLE_LAYER_ID) {
         return {
@@ -158,10 +143,6 @@ export function CoverCanvas({
       if (selectedTextId) {
         const text = textsRef.current.find((item) => item.id === selectedTextId);
         return { scale: text?.scale ?? 1, rotation: text?.rotation ?? 0 };
-      }
-      if (selectedStickerId) {
-        const sticker = stickersRef.current.find((item) => item.id === selectedStickerId);
-        return { scale: sticker?.scale ?? 1, rotation: sticker?.rotation ?? 0 };
       }
       const photo = photosRef.current.find((item) => item.id === selectedPhotoId);
       return { scale: photo?.scale ?? 1, rotation: photo?.rotation ?? 0 };
@@ -175,10 +156,6 @@ export function CoverCanvas({
         onScaleText?.(id, scale);
         return;
       }
-      if (stickersRef.current.some((item) => item.id === id)) {
-        onScaleSticker?.(id, scale);
-        return;
-      }
       onScalePhoto?.(id, scale);
     },
     onRotate: (id, rotation) => {
@@ -188,10 +165,6 @@ export function CoverCanvas({
       }
       if (textsRef.current.some((item) => item.id === id)) {
         onRotateText?.(id, rotation);
-        return;
-      }
-      if (stickersRef.current.some((item) => item.id === id)) {
-        onRotateSticker?.(id, rotation);
         return;
       }
       onRotatePhoto?.(id, rotation);
@@ -222,66 +195,56 @@ export function CoverCanvas({
         <Pressable style={StyleSheet.absoluteFill} onPress={onBackgroundPress} />
       ) : null}
 
-      {photos.map((layer) => {
-        const source = photoById[layer.photoId];
-        if (!source?.uri) {
-          return null;
+      {sortedLayers.map((item) => {
+        if (item.kind === 'photo') {
+          const layer = item.layer;
+          const source = photoById[layer.photoId];
+          if (!source?.uri) {
+            return null;
+          }
+          return (
+            <DraggablePhoto
+              key={`photo:${layer.id}`}
+              layer={layer}
+              uri={source.uri}
+              layoutUnit={layoutUnit}
+              selected={editable && selectedPhotoId === layer.id}
+              layoutRef={layoutRef}
+              onSelect={() => onSelectPhoto?.(layer.id)}
+              onMove={(x, y) => onMovePhoto?.(layer.id, x, y)}
+              onScale={(scale) => onScalePhoto?.(layer.id, scale)}
+              onRotate={(rotation) => onRotatePhoto?.(layer.id, rotation)}
+              onDragChange={onLayerDragChange}
+              onDragPointer={onLayerDragPointer}
+              onDragEnd={(pageX, pageY) => onPhotoDragEnd?.(layer.id, pageX, pageY)}
+            />
+          );
         }
-        return (
-          <DraggablePhoto
-            key={layer.id}
-            layer={layer}
-            uri={source.uri}
-            layoutUnit={layoutUnit}
-            selected={editable && selectedPhotoId === layer.id}
-            layoutRef={layoutRef}
-            onSelect={() => onSelectPhoto?.(layer.id)}
-            onMove={(x, y) => onMovePhoto?.(layer.id, x, y)}
-            onScale={(scale) => onScalePhoto?.(layer.id, scale)}
-            onRotate={(rotation) => onRotatePhoto?.(layer.id, rotation)}
-            onDragChange={onLayerDragChange}
-            onDragPointer={onLayerDragPointer}
-            onDragEnd={(pageX, pageY) => onPhotoDragEnd?.(layer.id, pageX, pageY)}
-          />
-        );
+
+        if (item.kind === 'text') {
+          const layer = item.layer;
+          return (
+            <DraggableText
+              key={`text:${layer.id}`}
+              layer={layer}
+              layoutUnit={layoutUnit}
+              selected={editable && selectedTextId === layer.id}
+              editable={editable}
+              layoutRef={layoutRef}
+              onSelect={() => onSelectText?.(layer.id)}
+              onEditRequest={() => onEditText?.(layer.id)}
+              onMove={(x, y) => onMoveText?.(layer.id, x, y)}
+              onScale={(scale) => onScaleText?.(layer.id, scale)}
+              onRotate={(rotation) => onRotateText?.(layer.id, rotation)}
+              onDragChange={onLayerDragChange}
+              onDragPointer={onLayerDragPointer}
+              onDragEnd={(pageX, pageY) => onTextDragEnd?.(layer.id, pageX, pageY)}
+            />
+          );
+        }
+
+        return null;
       })}
-
-      {texts.map((layer) => (
-        <DraggableText
-          key={layer.id}
-          layer={layer}
-          layoutUnit={layoutUnit}
-          selected={editable && selectedTextId === layer.id}
-          editable={editable}
-          layoutRef={layoutRef}
-          onSelect={() => onSelectText?.(layer.id)}
-          onEditRequest={() => onEditText?.(layer.id)}
-          onMove={(x, y) => onMoveText?.(layer.id, x, y)}
-          onScale={(scale) => onScaleText?.(layer.id, scale)}
-          onRotate={(rotation) => onRotateText?.(layer.id, rotation)}
-          onDragChange={onLayerDragChange}
-          onDragPointer={onLayerDragPointer}
-          onDragEnd={(pageX, pageY) => onTextDragEnd?.(layer.id, pageX, pageY)}
-        />
-      ))}
-
-      {stickers.map((sticker) => (
-        <DraggableSticker
-          key={sticker.id}
-          sticker={sticker}
-          layoutUnit={layoutUnit}
-          selected={editable && selectedStickerId === sticker.id}
-          editable={editable}
-          layoutRef={layoutRef}
-          onSelect={() => onSelectSticker?.(sticker.id)}
-          onMove={(x, y) => onMoveSticker?.(sticker.id, x, y)}
-          onScale={(scale) => onScaleSticker?.(sticker.id, scale)}
-          onRotate={(rotation) => onRotateSticker?.(sticker.id, rotation)}
-          onDragChange={onLayerDragChange}
-          onDragPointer={onLayerDragPointer}
-          onDragEnd={(pageX, pageY) => onStickerDragEnd?.(sticker.id, pageX, pageY)}
-        />
-      ))}
 
       <DraggableCoverTitle
         title={title}

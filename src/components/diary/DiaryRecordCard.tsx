@@ -14,7 +14,6 @@ export function DiaryRecordCard({ photo, onPress }: DiaryRecordCardProps) {
   const note = (photo.decoration?.note ?? photo.note)?.trim();
   const isVideo = (photo.mediaType ?? 'photo') === 'video';
   const hasDecor =
-    (photo.decoration?.stickers?.length ?? 0) > 0 ||
     (photo.decoration?.texts?.length ?? 0) > 0 ||
     Boolean(photo.decoration?.note?.trim());
 

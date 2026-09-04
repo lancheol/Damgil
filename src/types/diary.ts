@@ -9,7 +9,10 @@ export type DecorFontId =
   | 'display'
   | 'kedu'
   | 'keduBold'
-  | 'keduLine';
+  | 'keduLine'
+  | 'pretendard'
+  | 'pretendardMedium'
+  | 'pretendardBold';
 
 export type DecorSticker = {
   id: string;
@@ -18,6 +21,8 @@ export type DecorSticker = {
   y: number;
   scale: number;
   rotation: number;
+  /** 클수록 위. 없으면 로드 시 기본 부여 */
+  zIndex?: number;
 };
 
 /** 사진 위 텍스트 레이어 (스티커와 동일 제스처) */
@@ -30,6 +35,7 @@ export type DecorTextLayer = {
   y: number;
   scale: number;
   rotation: number;
+  zIndex?: number;
 };
 
 export type CoverFontId = DecorFontId;
@@ -102,6 +108,7 @@ export type DecorPhotoLayer = {
   scale: number;
   rotation: number;
   cropRect?: PhotoCropRect | null;
+  zIndex?: number;
 };
 
 /** 장소(페이지) 단위 꾸미기 — 사진·스티커·문구를 페이지에 자유롭게 배치 */
@@ -127,6 +134,8 @@ export type DiaryPlaceSelection = {
 
 export type Diary = {
   id: string;
+  /** 작성자 userId — 신고/차단용 (공개·목록 동기화 시 채움) */
+  userId?: string | null;
   name: string;
   place: string;
   createdAt: string;

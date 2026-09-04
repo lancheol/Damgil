@@ -6,13 +6,10 @@ import { DamgilLogo } from './DamgilLogo';
 export function HomeHeader() {
   return (
     <View style={styles.row}>
-      <View style={styles.left}>
-        <DamgilLogo />
-        <View style={styles.copy}>
-          <Text style={styles.title}>나의 다이어리</Text>
-          <Text style={styles.greeting}>안녕하세요</Text>
-        </View>
-      </View>
+      <DamgilLogo />
+      <Text style={styles.brand} accessibilityRole="header">
+        담길
+      </Text>
     </View>
   );
 }
@@ -21,27 +18,13 @@ const styles = StyleSheet.create({
   row: {
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'space-between',
+    gap: spacing.md,
     paddingHorizontal: spacing.xl,
     paddingTop: spacing.sm,
     paddingBottom: spacing.lg,
   },
-  left: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: spacing.md,
-    flexShrink: 1,
-  },
-  copy: {
-    gap: 2,
-    flexShrink: 1,
-  },
-  title: {
+  brand: {
     ...typography.brandTitle,
     color: colors.ink,
-  },
-  greeting: {
-    ...typography.greeting,
-    color: colors.inkSoft,
   },
 });

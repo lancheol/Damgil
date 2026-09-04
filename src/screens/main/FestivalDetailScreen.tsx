@@ -258,15 +258,19 @@ export function FestivalDetailScreen({ navigation, route }: Props) {
 
             {overview ? (
               <View style={styles.section}>
-                <Text style={styles.sectionTitle}>소개</Text>
-                <Text style={styles.bodyText}>{overview}</Text>
+                <View style={styles.proseCard}>
+                  <Text style={styles.sectionTitle}>소개</Text>
+                  <Text style={styles.bodyText}>{overview}</Text>
+                </View>
               </View>
             ) : null}
 
             {program ? (
               <View style={styles.section}>
-                <Text style={styles.sectionTitle}>프로그램</Text>
-                <Text style={styles.bodyText}>{program}</Text>
+                <View style={styles.proseCard}>
+                  <Text style={styles.sectionTitle}>프로그램</Text>
+                  <Text style={styles.bodyText}>{program}</Text>
+                </View>
               </View>
             ) : null}
 
@@ -366,7 +370,14 @@ function RelatedFestivalRow({
           {item.title}
         </Text>
         <Text style={styles.relatedMeta} numberOfLines={1}>
-          {[item.addr1, item.dist ? `${item.dist}m` : ''].filter(Boolean).join(' · ')}
+          {[
+            item.addr1,
+            item.dist != null && Number.isFinite(Number(item.dist))
+              ? `${Math.round(Number(item.dist))}m`
+              : '',
+          ]
+            .filter(Boolean)
+            .join(' · ')}
         </Text>
       </View>
       <Ionicons name="chevron-forward" size={16} color="#99A1AF" />
@@ -522,6 +533,13 @@ const styles = StyleSheet.create({
   },
   section: {
     marginBottom: spacing.lg,
+    gap: 10,
+  },
+  proseCard: {
+    borderRadius: radii.md,
+    backgroundColor: '#F7F7F7',
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.md,
     gap: 10,
   },
   sectionTitle: {

@@ -9,6 +9,7 @@ import {
   Alert,
   Animated,
   Dimensions,
+  Easing,
   Image,
   Keyboard,
   PanResponder,
@@ -29,10 +30,23 @@ import {
   MapPlace,
   MapPlaceCategory,
 } from '../../constants/mapPlaces';
-import { listSavedPlaces, savePlace, unsavePlace } from '../../api/saves';
+import { getMapPlaceDetail, getMapPlaces, getPlaceDiaries, getSavedMarkers } from '../../api/map';
+import { savePlace, unsavePlace } from '../../api/saves';
 import { loadTokens } from '../../api/tokenStorage';
-import { ApiError, SavedPlaceItemDto } from '../../api/types';
-import { mapPlaceFromSaved } from '../../utils/savedMapPlaces';
+import { ApiError, PlaceDiaryItemDto, SavedMarkerItemDto } from '../../api/types';
+import { useDiaries } from '../../context/DiaryContext';
+import {
+  formatStraightDistanceKm,
+  mapPlaceFromMapDetail,
+  MapPlaceDetailView,
+} from '../../utils/mapPlaceDetail';
+import {
+  mapPlaceFromSavedMarker,
+  markerCategoriesFromMapCategories,
+  markerCategoryFromMapCategory,
+  placeMatchesMapCategories,
+} from '../../utils/savedMapPlaces';
+import { isPartialMapCoverage, isValidBbox, regionToBbox } from '../../utils/mapViewport';
 import {
   loadMapLocationPrefs,
   saveMapLocationPrefs,
@@ -41,34 +55,68 @@ import {
 import {
   MapLocation,
   mapPlaceFromSearch,
-  searchTravelPlaces,
-  tourTypeFromMapCategory,
+  searchMapTravelPlaces,
 } from '../../utils/placeSearch';
 import { MainTabParamList, RootStackParamList } from '../../navigation/types';
 import { colors, radii, spacing } from '../../theme';
 
 const SEARCH_DEBOUNCE_MS = 280;
+const VIEWPORT_FETCH_DEBOUNCE_MS = 400;
+const MAP_PLACES_LIMIT = 200;
+const PLACE_DIARIES_PAGE_SIZE = 20;
 
 type Props = CompositeScreenProps<
   BottomTabScreenProps<MainTabParamList, 'Map'>,
   NativeStackScreenProps<RootStackParamList>
 >;
 
-/** 장소별 관련 공개 다이어리 — API 연동 전까지 UI 골격용 */
 type PlaceRelatedDiary = {
   id: string;
   authorNickname: string;
   title: string;
   dateLabel: string;
-  saveCount: number;
+  likeCount: number;
   coverThumbUrl: string | null;
 };
+
+function formatPublishedAt(value: string | null | undefined): string {
+  const raw = value?.trim();
+  if (!raw) {
+    return '';
+  }
+  const datePart = raw.slice(0, 10);
+  if (/^\d{4}-\d{2}-\d{2}$/.test(datePart)) {
+    return datePart.replace(/-/g, '.');
+  }
+  const parsed = new Date(raw);
+  if (Number.isNaN(parsed.getTime())) {
+    return raw;
+  }
+  const y = parsed.getFullYear();
+  const m = `${parsed.getMonth() + 1}`.padStart(2, '0');
+  const d = `${parsed.getDate()}`.padStart(2, '0');
+  return `${y}.${m}.${d}`;
+}
+
+function mapPlaceDiaryItem(item: PlaceDiaryItemDto): PlaceRelatedDiary {
+  return {
+    id: item.tripId,
+    authorNickname: item.authorNickname?.trim() || '여행자',
+    title: item.title?.trim() || '제목 없음',
+    dateLabel: formatPublishedAt(item.publishedAt),
+    likeCount: item.likeCount ?? 0,
+    coverThumbUrl: item.thumbnailUrl1?.trim() || null,
+  };
+}
 
 /** 카드가 마커를 가리지 않도록 지도를 살짝 위로 밀어주는 값 */
 const FOCUS_LAT_OFFSET = 0.006;
 const WINDOW_HEIGHT = Dimensions.get('window').height;
 /** 접힌 시트 높이 (기존 떠 있는 카드와 비슷한 비율) */
 const SHEET_COLLAPSED_HEIGHT = Math.round(WINDOW_HEIGHT * 0.48);
+/** 접힌 상태의 sheet top 값 (화면 아래에서 접힌 높이만큼 보이게) */
+const SHEET_COLLAPSED_Y = WINDOW_HEIGHT - SHEET_COLLAPSED_HEIGHT;
+const SHEET_HIDDEN_Y = WINDOW_HEIGHT;
 
 /** 세션 중 빠른 복원용 (앱 재시작 시 AsyncStorage에서 다시 채움) */
 let memoryShowsUserLocation = false;
@@ -76,50 +124,38 @@ let memoryMapRegion: Region | null = null;
 let didFitSavedPinsOnce = false;
 let prefsHydrated = false;
 
-/** TODO: 장소 contentId 기준 관련 공개 다이어리 API로 교체 */
-const MOCK_RELATED_DIARIES: PlaceRelatedDiary[] = [
-  {
-    id: 'mock-diary-01',
-    authorNickname: 'travel_mina',
-    title: '주말 산책 기록',
-    dateLabel: '2026.03.12',
-    saveCount: 24,
-    coverThumbUrl: 'https://picsum.photos/seed/damgil-map-1/240/320',
-  },
-  {
-    id: 'mock-diary-02',
-    authorNickname: 'slow.trip',
-    title: '비 오는 날의 카페 투어',
-    dateLabel: '2026.02.28',
-    saveCount: 11,
-    coverThumbUrl: 'https://picsum.photos/seed/damgil-map-2/240/320',
-  },
-  {
-    id: 'mock-diary-03',
-    authorNickname: 'notebook.kim',
-    title: '혼자 떠난 반나절 코스',
-    dateLabel: '2026.01.19',
-    saveCount: 7,
-    coverThumbUrl: 'https://picsum.photos/seed/damgil-map-3/240/320',
-  },
-];
-
 export function MapScreen({ navigation, route }: Props) {
   const insets = useSafeAreaInsets();
+  const { openPublicDiary } = useDiaries();
   const mapRef = useRef<MapView | null>(null);
   const [query, setQuery] = useState('');
-  const [category, setCategory] = useState<MapPlaceCategory | null>(null);
+  const [selectedCategories, setSelectedCategories] = useState<MapPlaceCategory[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
-  const [savedPlaces, setSavedPlaces] = useState<SavedPlaceItemDto[]>([]);
+  const [savedMarkers, setSavedMarkers] = useState<SavedMarkerItemDto[]>([]);
+  const [viewportMarkers, setViewportMarkers] = useState<SavedMarkerItemDto[]>([]);
+  const [viewportTruncated, setViewportTruncated] = useState(false);
+  const [viewportBBoxError, setViewportBBoxError] = useState(false);
+  const [viewportCoveragePartial, setViewportCoveragePartial] = useState(false);
   const [saveBusyId, setSaveBusyId] = useState<string | null>(null);
+  /** 상세가 열린 동안 찜 해제만 해 두고, 닫을 때 핀에서 제거 */
+  const pendingUnsaveIdsRef = useRef(new Set<string>());
+  const [pendingUnsaveVersion, setPendingUnsaveVersion] = useState(0);
+  const prevSelectedIdRef = useRef<string | null>(null);
   const [showsUserLocation, setShowsUserLocation] = useState(memoryShowsUserLocation);
   const [mapReady, setMapReady] = useState(prefsHydrated);
   const [initialRegion, setInitialRegion] = useState<Region>(
     memoryMapRegion ?? MAP_INITIAL_REGION,
   );
-  /** TODO: 장소 contentId 기준 관련 다이어리 API로 교체 */
   const [relatedDiaries, setRelatedDiaries] = useState<PlaceRelatedDiary[]>([]);
   const [relatedLoading, setRelatedLoading] = useState(false);
+  const [relatedTotal, setRelatedTotal] = useState(0);
+  const [openingDiaryId, setOpeningDiaryId] = useState<string | null>(null);
+  const [placeDetail, setPlaceDetail] = useState<MapPlaceDetailView | null>(null);
+  const [placeDetailLoading, setPlaceDetailLoading] = useState(false);
+  const [placeUnavailable, setPlaceUnavailable] = useState(false);
+  const placeDiariesRequestRef = useRef(0);
+  const placeDetailRequestRef = useRef(0);
+  const openingDiaryIdRef = useRef<string | null>(null);
   const [externalPlace, setExternalPlace] = useState<MapPlace | null>(null);
   const [suggestions, setSuggestions] = useState<MapLocation[]>([]);
   const [dropdownOpen, setDropdownOpen] = useState(false);
@@ -127,52 +163,82 @@ export function MapScreen({ navigation, route }: Props) {
   const [sheetExpanded, setSheetExpanded] = useState(false);
   const searchSeqRef = useRef(0);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const sheetHeight = useRef(new Animated.Value(SHEET_COLLAPSED_HEIGHT)).current;
-  const sheetDragStart = useRef(SHEET_COLLAPSED_HEIGHT);
+  const viewportDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const viewportRequestRef = useRef(0);
+  const lastViewportRegionRef = useRef<Region | null>(
+    memoryMapRegion ?? MAP_INITIAL_REGION,
+  );
+  /** 상세 열기 직전 배율 — 시트 닫을 때 복원 */
+  const preFocusRegionRef = useRef<Region | null>(null);
+  const selectedIdRef = useRef<string | null>(null);
+  /** top: sheetExpandedY=검색바 걸침, SHEET_COLLAPSED_Y=접힘, SHEET_HIDDEN_Y=숨김 */
+  const sheetTop = useRef(new Animated.Value(SHEET_COLLAPSED_Y)).current;
+  const sheetDragStart = useRef(SHEET_COLLAPSED_Y);
+  const sheetSlideAnimRef = useRef<Animated.CompositeAnimation | null>(null);
+  const sheetMountedRef = useRef(false);
+  const [sheetPlace, setSheetPlace] = useState<MapPlace | null>(null);
+  /** iOS에서 핀 탭 직후 MapView.onPress가 선택을 지우는 것 방지 */
+  const ignoreMapPressUntilRef = useRef(0);
+  /** 영역 재조회로 places에서 빠져도 시트/선택 유지 */
+  const [focusedPlace, setFocusedPlace] = useState<MapPlace | null>(null);
+  const placesRef = useRef<MapPlace[]>([]);
 
   const tabClearance = insets.bottom + 88;
-  /** 펼침 = 화면 전체 높이 */
-  const sheetExpandedHeight = WINDOW_HEIGHT;
+
+  /**
+   * 펼침 상한 — 시트 상단이 검색바를 걸쳐 가리는 위치.
+   * (safe area + 여백 위는 지도가 보이고, 검색바부터 아래로 시트가 덮음)
+   */
+  const sheetExpandedY = insets.top + spacing.sm;
 
   const snapSheetTo = useCallback(
     (expanded: boolean) => {
-      const next = expanded ? sheetExpandedHeight : SHEET_COLLAPSED_HEIGHT;
-      setSheetExpanded(expanded);
+      const next = expanded ? sheetExpandedY : SHEET_COLLAPSED_Y;
       if (expanded) {
         Keyboard.dismiss();
         setDropdownOpen(false);
       }
-      Animated.spring(sheetHeight, {
+      sheetSlideAnimRef.current?.stop();
+      sheetSlideAnimRef.current = Animated.spring(sheetTop, {
         toValue: next,
         useNativeDriver: false,
-        friction: 9,
-        tension: 70,
-      }).start();
+        friction: 8,
+        tension: 65,
+        restDisplacementThreshold: 0.5,
+        restSpeedThreshold: 0.5,
+      });
+      sheetSlideAnimRef.current.start(({ finished }) => {
+        if (!finished) {
+          return;
+        }
+        setSheetExpanded(expanded);
+      });
     },
-    [sheetExpandedHeight, sheetHeight],
+    [sheetTop, sheetExpandedY],
   );
 
   const sheetPanResponder = useMemo(
     () =>
       PanResponder.create({
         onStartShouldSetPanResponder: () => true,
-        onMoveShouldSetPanResponder: (_, gesture) => Math.abs(gesture.dy) > 3,
+        onMoveShouldSetPanResponder: (_, gesture) => Math.abs(gesture.dy) > 2,
         onPanResponderTerminationRequest: () => false,
         onPanResponderGrant: () => {
-          sheetHeight.stopAnimation((value) => {
+          sheetSlideAnimRef.current?.stop();
+          sheetTop.stopAnimation((value) => {
             sheetDragStart.current = value;
           });
         },
         onPanResponderMove: (_, gesture) => {
           const next = Math.min(
-            sheetExpandedHeight,
-            Math.max(SHEET_COLLAPSED_HEIGHT, sheetDragStart.current - gesture.dy),
+            SHEET_COLLAPSED_Y,
+            Math.max(sheetExpandedY, sheetDragStart.current + gesture.dy),
           );
-          sheetHeight.setValue(next);
+          sheetTop.setValue(next);
         },
         onPanResponderRelease: (_, gesture) => {
-          const mid = (SHEET_COLLAPSED_HEIGHT + sheetExpandedHeight) / 2;
-          sheetHeight.stopAnimation((value) => {
+          const mid = (SHEET_COLLAPSED_Y + sheetExpandedY) / 2;
+          sheetTop.stopAnimation((value) => {
             const flingUp = gesture.vy < -0.55;
             const flingDown = gesture.vy > 0.55;
             if (flingUp) {
@@ -183,69 +249,86 @@ export function MapScreen({ navigation, route }: Props) {
               snapSheetTo(false);
               return;
             }
-            snapSheetTo(value >= mid);
+            snapSheetTo(value <= mid);
           });
         },
       }),
-    [sheetExpandedHeight, sheetHeight, snapSheetTo],
+    [sheetTop, snapSheetTo, sheetExpandedY],
   );
 
   useEffect(() => {
+    if (!selectedId || !sheetMountedRef.current) {
+      return;
+    }
+    // 이미 열린 상태에서 다른 장소로 바꿀 때만 접힌 위치로 맞춤
     setSheetExpanded(false);
-    sheetHeight.setValue(SHEET_COLLAPSED_HEIGHT);
-  }, [selectedId, sheetHeight]);
-
-  useEffect(() => {
-    navigation.setOptions({
-      tabBarStyle: sheetExpanded ? { display: 'none' } : undefined,
-    });
-  }, [navigation, sheetExpanded]);
+    sheetTop.setValue(SHEET_COLLAPSED_Y);
+  }, [selectedId, sheetTop]);
 
   useFocusEffect(
     useCallback(() => {
       return () => {
         flushMapLocationPrefs();
-        navigation.setOptions({ tabBarStyle: undefined });
       };
-    }, [navigation]),
+    }, []),
+  );
+
+  const apiCategories = useMemo(
+    () => markerCategoriesFromMapCategories(selectedCategories),
+    [selectedCategories],
   );
 
   const savedPins = useMemo(
     () =>
-      savedPlaces
-        .map(mapPlaceFromSaved)
+      savedMarkers
+        .map(mapPlaceFromSavedMarker)
         .filter((place): place is MapPlace => place != null),
-    [savedPlaces],
+    [savedMarkers],
   );
 
-  /** 지도 핀: 찜한 장소 + 검색으로 고른 장소 */
+  const viewportPins = useMemo(
+    () =>
+      viewportMarkers
+        .map(mapPlaceFromSavedMarker)
+        .filter((place): place is MapPlace => place != null),
+    [viewportMarkers],
+  );
+
+  /** 지도 핀: 영역 장소 + 찜 + 검색으로 고른 장소 */
   const places = useMemo(() => {
     const byId = new Map<string, MapPlace>();
-    for (const place of savedPins) {
-      if (category === null || place.category === category) {
+    const matches = (place: MapPlace) =>
+      placeMatchesMapCategories(place.category, selectedCategories);
+
+    for (const place of viewportPins) {
+      if (matches(place)) {
         byId.set(place.id, place);
       }
     }
-    if (
-      externalPlace &&
-      !byId.has(externalPlace.id) &&
-      (category === null || externalPlace.category === category)
-    ) {
+    for (const place of savedPins) {
+      if (matches(place)) {
+        byId.set(place.id, place);
+      }
+    }
+    if (externalPlace && !byId.has(externalPlace.id) && matches(externalPlace)) {
       byId.set(externalPlace.id, externalPlace);
     }
     return [...byId.values()];
-  }, [category, savedPins, externalPlace]);
+  }, [externalPlace, savedPins, selectedCategories, viewportPins]);
 
   useEffect(() => {
     return () => {
       if (debounceRef.current) {
         clearTimeout(debounceRef.current);
       }
+      if (viewportDebounceRef.current) {
+        clearTimeout(viewportDebounceRef.current);
+      }
     };
   }, []);
 
   const runSearch = useCallback(
-    async (text: string, categoryFilter: MapPlaceCategory | null) => {
+    async (text: string, categories: MapPlaceCategory[]) => {
       const trimmed = text.trim();
       if (!trimmed) {
         setSuggestions([]);
@@ -259,8 +342,8 @@ export function MapScreen({ navigation, route }: Props) {
       setSearching(true);
 
       try {
-        const results = await searchTravelPlaces(trimmed, {
-          type: tourTypeFromMapCategory(categoryFilter),
+        const results = await searchMapTravelPlaces(trimmed, {
+          categories,
           rows: 10,
         });
         if (searchSeqRef.current !== seq) {
@@ -278,12 +361,12 @@ export function MapScreen({ navigation, route }: Props) {
   );
 
   const scheduleSearch = useCallback(
-    (text: string, categoryFilter: MapPlaceCategory | null) => {
+    (text: string, categories: MapPlaceCategory[]) => {
       if (debounceRef.current) {
         clearTimeout(debounceRef.current);
       }
       debounceRef.current = setTimeout(() => {
-        void runSearch(text, categoryFilter);
+        void runSearch(text, categories);
       }, SEARCH_DEBOUNCE_MS);
     },
     [runSearch],
@@ -297,7 +380,7 @@ export function MapScreen({ navigation, route }: Props) {
       setSearching(false);
       return;
     }
-    scheduleSearch(text, category);
+    scheduleSearch(text, selectedCategories);
   };
 
   useFocusEffect(
@@ -319,7 +402,25 @@ export function MapScreen({ navigation, route }: Props) {
           latitude: lat,
           longitude: lng,
         };
+        if (!selectedIdRef.current) {
+          const current = lastViewportRegionRef.current;
+          if (
+            current &&
+            Number.isFinite(current.latitudeDelta) &&
+            Number.isFinite(current.longitudeDelta) &&
+            current.latitudeDelta > 0 &&
+            current.longitudeDelta > 0
+          ) {
+            preFocusRegionRef.current = {
+              latitude: current.latitude,
+              longitude: current.longitude,
+              latitudeDelta: current.latitudeDelta,
+              longitudeDelta: current.longitudeDelta,
+            };
+          }
+        }
         setExternalPlace(mapped);
+        setFocusedPlace(mapped);
         setSelectedId(mapped.id);
         mapRef.current?.animateToRegion(
           {
@@ -333,7 +434,25 @@ export function MapScreen({ navigation, route }: Props) {
       } else {
         const local = MAP_PLACES.find((place) => place.id === focus.contentId);
         if (local) {
+          if (!selectedIdRef.current) {
+            const current = lastViewportRegionRef.current;
+            if (
+              current &&
+              Number.isFinite(current.latitudeDelta) &&
+              Number.isFinite(current.longitudeDelta) &&
+              current.latitudeDelta > 0 &&
+              current.longitudeDelta > 0
+            ) {
+              preFocusRegionRef.current = {
+                latitude: current.latitude,
+                longitude: current.longitude,
+                latitudeDelta: current.latitudeDelta,
+                longitudeDelta: current.longitudeDelta,
+              };
+            }
+          }
           setExternalPlace(null);
+          setFocusedPlace(local);
           setSelectedId(local.id);
           mapRef.current?.animateToRegion(
             {
@@ -348,26 +467,225 @@ export function MapScreen({ navigation, route }: Props) {
       }
     }, [route.params?.focusPlace]),
   );
-  const selectedPlace = places.find((place) => place.id === selectedId) ?? null;
+  const selectedPlace =
+    (selectedId
+      ? places.find((place) => place.id === selectedId) ??
+        (externalPlace?.id === selectedId ? externalPlace : null) ??
+        (focusedPlace?.id === selectedId ? focusedPlace : null) ??
+        (sheetPlace?.id === selectedId ? sheetPlace : null)
+      : null);
   const savedIds = useMemo(
-    () => savedPlaces.map((item) => item.contentId),
-    [savedPlaces],
+    () => savedMarkers.map((item) => item.placeId),
+    [savedMarkers],
   );
-  const isSaved = selectedPlace ? savedIds.includes(selectedPlace.id) : false;
+  const viewportSavedIds = useMemo(
+    () =>
+      new Set(
+        viewportMarkers.filter((item) => item.saved).map((item) => item.placeId),
+      ),
+    [viewportMarkers],
+  );
+  const searchSavedIds = useMemo(
+    () =>
+      new Set(
+        suggestions
+          .filter((item) => item.saved && item.contentId)
+          .map((item) => item.contentId as string),
+      ),
+    [suggestions],
+  );
+  const isPlaceSaved = useCallback(
+    (contentId: string) =>
+      (savedIds.includes(contentId) ||
+        viewportSavedIds.has(contentId) ||
+        searchSavedIds.has(contentId)) &&
+      !pendingUnsaveIdsRef.current.has(contentId),
+    // pendingUnsaveVersion: 해제 예약 Set 변경 시 하트/핀 색 갱신
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [savedIds, searchSavedIds, viewportSavedIds, pendingUnsaveVersion],
+  );
+  const isSaved = sheetPlace
+    ? pendingUnsaveIdsRef.current.has(sheetPlace.id)
+      ? false
+      : placeDetail?.placeId === sheetPlace.id
+        ? placeDetail.saved || isPlaceSaved(sheetPlace.id)
+        : isPlaceSaved(sheetPlace.id)
+    : false;
 
-  const refreshSavedPlaces = useCallback(async () => {
+  const displayPlace =
+    sheetPlace && placeDetail?.placeId === sheetPlace.id
+      ? placeDetail.place
+      : sheetPlace;
+  const distanceLabel =
+    sheetPlace && placeDetail?.placeId === sheetPlace.id
+      ? formatStraightDistanceKm(placeDetail.distanceKm)
+      : null;
+  const sheetImages =
+    sheetPlace && placeDetail?.placeId === sheetPlace.id ? placeDetail.images : [];
+  const sheetDiaryCount =
+    sheetPlace && placeDetail?.placeId === sheetPlace.id
+      ? placeDetail.diaryCount
+      : relatedTotal;
+
+  useEffect(() => {
+    if (selectedPlace) {
+      sheetSlideAnimRef.current?.stop();
+      const opening = !sheetMountedRef.current;
+      sheetMountedRef.current = true;
+      setSheetPlace(selectedPlace);
+      if (opening) {
+        sheetTop.setValue(SHEET_HIDDEN_Y);
+        sheetSlideAnimRef.current = Animated.spring(sheetTop, {
+          toValue: SHEET_COLLAPSED_Y,
+          useNativeDriver: false,
+          friction: 8,
+          tension: 65,
+          restDisplacementThreshold: 0.5,
+          restSpeedThreshold: 0.5,
+        });
+        sheetSlideAnimRef.current.start(({ finished }) => {
+          if (finished) {
+            setSheetExpanded(false);
+          }
+        });
+      }
+      return;
+    }
+
+    if (!sheetMountedRef.current) {
+      return;
+    }
+
+    sheetSlideAnimRef.current?.stop();
+    setSheetExpanded(false);
+    sheetSlideAnimRef.current = Animated.timing(sheetTop, {
+      toValue: SHEET_HIDDEN_Y,
+      duration: 220,
+      easing: Easing.out(Easing.cubic),
+      useNativeDriver: false,
+    });
+    sheetSlideAnimRef.current.start(({ finished }) => {
+      if (!finished) {
+        return;
+      }
+      sheetMountedRef.current = false;
+      setSheetPlace(null);
+    });
+  }, [selectedPlace, sheetTop]);
+
+  const bumpPendingUnsave = useCallback(() => {
+    setPendingUnsaveVersion((value) => value + 1);
+  }, []);
+
+  const flushPendingUnsaveFor = useCallback(
+    (contentId: string | null | undefined) => {
+      if (!contentId || !pendingUnsaveIdsRef.current.has(contentId)) {
+        return;
+      }
+      pendingUnsaveIdsRef.current.delete(contentId);
+      setSavedMarkers((prev) => prev.filter((item) => item.placeId !== contentId));
+      setViewportMarkers((prev) =>
+        prev.map((item) =>
+          item.placeId === contentId ? { ...item, saved: false } : item,
+        ),
+      );
+      bumpPendingUnsave();
+    },
+    [bumpPendingUnsave],
+  );
+
+  useEffect(() => {
+    const prev = prevSelectedIdRef.current;
+    if (prev && prev !== selectedId) {
+      flushPendingUnsaveFor(prev);
+    }
+    prevSelectedIdRef.current = selectedId;
+  }, [selectedId, flushPendingUnsaveFor]);
+
+  const refreshSavedMarkers = useCallback(async () => {
     try {
       const tokens = await loadTokens();
       if (!tokens?.access) {
-        setSavedPlaces([]);
+        setSavedMarkers([]);
         return;
       }
-      const items = await listSavedPlaces(tokens.access);
-      setSavedPlaces(items);
+      const markerCategory = apiCategories;
+      const response = await getSavedMarkers(tokens.access, {
+        ...(markerCategory ? { category: markerCategory } : {}),
+      });
+      const items = response.items ?? [];
+      setSavedMarkers((prev) => {
+        const pending = pendingUnsaveIdsRef.current;
+        if (pending.size === 0) {
+          return items;
+        }
+        // 상세 열려 있는 동안 해제한 핀은 닫을 때까지 유지
+        const sticky = prev.filter((item) => pending.has(item.placeId));
+        const merged = [...items];
+        for (const item of sticky) {
+          if (!merged.some((row) => row.placeId === item.placeId)) {
+            merged.push(item);
+          }
+        }
+        return merged;
+      });
     } catch {
       // 목록 실패 시 기존 핀 유지 — 토글 시 서버가 최종 상태
     }
-  }, []);
+  }, [apiCategories]);
+
+  const fetchViewportPlaces = useCallback(async (region: Region) => {
+    const requestId = viewportRequestRef.current + 1;
+    viewportRequestRef.current = requestId;
+    lastViewportRegionRef.current = region;
+
+    const bbox = regionToBbox(region);
+    if (!isValidBbox(bbox)) {
+      return;
+    }
+
+    try {
+      const tokens = await loadTokens();
+      const markerCategory = apiCategories;
+      const response = await getMapPlaces(tokens?.access, {
+        ...bbox,
+        limit: MAP_PLACES_LIMIT,
+        ...(markerCategory ? { category: markerCategory } : {}),
+      });
+      if (viewportRequestRef.current !== requestId) {
+        return;
+      }
+      setViewportMarkers(response.items ?? []);
+      setViewportTruncated(Boolean(response.truncated));
+      setViewportCoveragePartial(isPartialMapCoverage(response.coverage));
+      setViewportBBoxError(false);
+    } catch (error) {
+      if (viewportRequestRef.current !== requestId) {
+        return;
+      }
+      if (error instanceof ApiError && error.code === 'BBOX_TOO_LARGE') {
+        setViewportMarkers([]);
+        setViewportTruncated(false);
+        setViewportCoveragePartial(false);
+        setViewportBBoxError(true);
+        return;
+      }
+      // 그 외 오류는 기존 영역 핀 유지
+    }
+  }, [apiCategories]);
+
+  const scheduleViewportFetch = useCallback(
+    (region: Region) => {
+      lastViewportRegionRef.current = region;
+      if (viewportDebounceRef.current) {
+        clearTimeout(viewportDebounceRef.current);
+      }
+      viewportDebounceRef.current = setTimeout(() => {
+        void fetchViewportPlaces(region);
+      }, VIEWPORT_FETCH_DEBOUNCE_MS);
+    },
+    [fetchViewportPlaces],
+  );
 
   const persistPrefs = useCallback(
     (next: { showsUserLocation?: boolean; region?: Region | null }) => {
@@ -420,7 +738,7 @@ export function MapScreen({ navigation, route }: Props) {
 
   useFocusEffect(
     useCallback(() => {
-      void refreshSavedPlaces();
+      void refreshSavedMarkers();
       void (async () => {
         // 이미 허용된 경우만 내 위치 점 복원. request()는 절대 자동 호출하지 않음.
         const permission = await Location.getForegroundPermissionsAsync();
@@ -437,8 +755,27 @@ export function MapScreen({ navigation, route }: Props) {
         }
         setShowsUserLocation(true);
       })();
-    }, [refreshSavedPlaces]),
+    }, [refreshSavedMarkers]),
   );
+
+  useEffect(() => {
+    void refreshSavedMarkers();
+  }, [refreshSavedMarkers]);
+
+  useEffect(() => {
+    if (!mapReady) {
+      return;
+    }
+    scheduleViewportFetch(initialRegion);
+  }, [initialRegion, mapReady, scheduleViewportFetch]);
+
+  useEffect(() => {
+    const region = lastViewportRegionRef.current;
+    if (!region) {
+      return;
+    }
+    void fetchViewportPlaces(region);
+  }, [apiCategories, fetchViewportPlaces]);
 
   useEffect(() => {
     if (
@@ -467,30 +804,289 @@ export function MapScreen({ navigation, route }: Props) {
 
   useEffect(() => {
     if (!selectedId) {
+      placeDetailRequestRef.current += 1;
+      setPlaceDetail(null);
+      setPlaceDetailLoading(false);
+      setPlaceUnavailable(false);
+      return;
+    }
+
+    const requestId = placeDetailRequestRef.current + 1;
+    placeDetailRequestRef.current = requestId;
+    setPlaceDetailLoading(true);
+    setPlaceUnavailable(false);
+    setPlaceDetail(null);
+
+    void (async () => {
+      try {
+        const tokens = await loadTokens();
+        let lat: number | undefined;
+        let lng: number | undefined;
+        try {
+          const permission = await Location.getForegroundPermissionsAsync();
+          if (permission.granted) {
+            const last = await Location.getLastKnownPositionAsync();
+            if (
+              last &&
+              Number.isFinite(last.coords.latitude) &&
+              Number.isFinite(last.coords.longitude)
+            ) {
+              lat = last.coords.latitude;
+              lng = last.coords.longitude;
+            }
+          }
+        } catch {
+          // 위치 없으면 거리 없이 상세만 조회
+        }
+
+        const response = await getMapPlaceDetail(tokens?.access, selectedId, {
+          lat,
+          lng,
+        });
+        if (placeDetailRequestRef.current !== requestId) {
+          return;
+        }
+
+        const fallback =
+          places.find((place) => place.id === selectedId) ??
+          (externalPlace?.id === selectedId ? externalPlace : null);
+        const view = mapPlaceFromMapDetail(response, fallback);
+        setPlaceDetail(view);
+        setPlaceUnavailable(false);
+
+        // 상세의 찜 상태를 마커 목록에 동기화 (해제 예약 중이면 유지)
+        if (!pendingUnsaveIdsRef.current.has(view.placeId)) {
+          if (view.saved) {
+            setViewportMarkers((prev) =>
+              prev.map((item) =>
+                item.placeId === view.placeId ? { ...item, saved: true } : item,
+              ),
+            );
+            setSavedMarkers((prev) => {
+              if (prev.some((item) => item.placeId === view.placeId)) {
+                return prev;
+              }
+              if (
+                view.lat == null ||
+                view.lng == null ||
+                !Number.isFinite(view.lat) ||
+                !Number.isFinite(view.lng)
+              ) {
+                return prev;
+              }
+              return [
+                ...prev,
+                {
+                  placeId: view.placeId,
+                  title: view.place.name,
+                  addr1: view.place.address,
+                  lat: view.lat,
+                  lng: view.lng,
+                  categoryCode:
+                    markerCategoryFromMapCategory(view.place.category) ?? 'OTHER',
+                  saved: true,
+                },
+              ];
+            });
+          }
+        }
+      } catch (error) {
+        if (placeDetailRequestRef.current !== requestId) {
+          return;
+        }
+        // 비활성·삭제 등 — 일반 탐색에서 제외된 장소 (MAP-BE-015)
+        if (
+          error instanceof ApiError &&
+          (error.status === 404 ||
+            error.code === 'PLACE_NOT_FOUND' ||
+            error.code === 'PLACE_INACTIVE')
+        ) {
+          setPlaceUnavailable(true);
+          setPlaceDetail(null);
+          return;
+        }
+        setPlaceDetail(null);
+      } finally {
+        if (placeDetailRequestRef.current === requestId) {
+          setPlaceDetailLoading(false);
+        }
+      }
+    })();
+  }, [selectedId]);
+
+  useEffect(() => {
+    if (!selectedId) {
+      placeDiariesRequestRef.current += 1;
       setRelatedDiaries([]);
+      setRelatedTotal(0);
       setRelatedLoading(false);
       return;
     }
-    // TODO: 장소 contentId 기준 관련 다이어리 API 연결
-    setRelatedLoading(false);
-    setRelatedDiaries(MOCK_RELATED_DIARIES);
+
+    const requestId = placeDiariesRequestRef.current + 1;
+    placeDiariesRequestRef.current = requestId;
+    setRelatedLoading(true);
+    setRelatedDiaries([]);
+    setRelatedTotal(0);
+
+    void (async () => {
+      try {
+        const tokens = await loadTokens();
+        const response = await getPlaceDiaries(tokens?.access, selectedId, {
+          page: 1,
+          pageSize: PLACE_DIARIES_PAGE_SIZE,
+        });
+        if (placeDiariesRequestRef.current !== requestId) {
+          return;
+        }
+        setRelatedDiaries((response.items ?? []).map(mapPlaceDiaryItem));
+        setRelatedTotal(response.total ?? response.items?.length ?? 0);
+      } catch {
+        if (placeDiariesRequestRef.current !== requestId) {
+          return;
+        }
+        setRelatedDiaries([]);
+        setRelatedTotal(0);
+      } finally {
+        if (placeDiariesRequestRef.current === requestId) {
+          setRelatedLoading(false);
+        }
+      }
+    })();
   }, [selectedId]);
+
+  const openRelatedDiary = useCallback(
+    async (diary: PlaceRelatedDiary) => {
+      if (openingDiaryIdRef.current) {
+        return;
+      }
+      openingDiaryIdRef.current = diary.id;
+      setOpeningDiaryId(diary.id);
+      try {
+        const result = await openPublicDiary(diary.id);
+        if (result.status === 'gone') {
+          setRelatedDiaries((prev) => prev.filter((item) => item.id !== diary.id));
+          setRelatedTotal((prev) => Math.max(0, prev - 1));
+          return;
+        }
+        if (result.status !== 'ok') {
+          return;
+        }
+        navigation.navigate('DiaryEdit', {
+          diaryId: result.diary.id,
+          mode: 'view',
+          likeCount: diary.likeCount,
+        });
+      } finally {
+        openingDiaryIdRef.current = null;
+        setOpeningDiaryId(null);
+      }
+    },
+    [navigation, openPublicDiary],
+  );
+
+  placesRef.current = places;
+  selectedIdRef.current = selectedId;
 
   const moveTo = (region: Region) => {
     mapRef.current?.animateToRegion(region, 400);
   };
 
-  const focusPlace = (place: MapPlace) => {
-    setSelectedId(place.id);
+  /** 상세를 처음 열 때만 현재 배율 저장 (핀 간 전환 시에는 유지) */
+  const rememberRegionBeforeFocus = useCallback(() => {
+    if (selectedIdRef.current) {
+      return;
+    }
+    const current = lastViewportRegionRef.current;
+    if (
+      !current ||
+      !Number.isFinite(current.latitude) ||
+      !Number.isFinite(current.longitude) ||
+      !Number.isFinite(current.latitudeDelta) ||
+      !Number.isFinite(current.longitudeDelta) ||
+      current.latitudeDelta <= 0 ||
+      current.longitudeDelta <= 0
+    ) {
+      return;
+    }
+    preFocusRegionRef.current = {
+      latitude: current.latitude,
+      longitude: current.longitude,
+      latitudeDelta: current.latitudeDelta,
+      longitudeDelta: current.longitudeDelta,
+    };
+  }, []);
+
+  const focusPlace = useCallback(
+    (place: MapPlace) => {
+      // Marker.onPress 직후 MapView.onPress가 따라와 selectedId를 지우는 iOS 이슈 방어
+      ignoreMapPressUntilRef.current = Date.now() + 750;
+      rememberRegionBeforeFocus();
+      setFocusedPlace(place);
+      setSelectedId(place.id);
+      setDropdownOpen(false);
+      Keyboard.dismiss();
+      moveTo({
+        latitude: place.latitude - FOCUS_LAT_OFFSET,
+        longitude: place.longitude,
+        latitudeDelta: 0.02,
+        longitudeDelta: 0.02,
+      });
+    },
+    [rememberRegionBeforeFocus],
+  );
+
+  const clearPlaceSelection = useCallback(() => {
+    const restore = preFocusRegionRef.current;
+    preFocusRegionRef.current = null;
+    setSelectedId(null);
+    setFocusedPlace(null);
     setDropdownOpen(false);
     Keyboard.dismiss();
-    moveTo({
-      latitude: place.latitude - FOCUS_LAT_OFFSET,
-      longitude: place.longitude,
-      latitudeDelta: 0.02,
-      longitudeDelta: 0.02,
-    });
-  };
+    if (
+      restore &&
+      Number.isFinite(restore.latitude) &&
+      Number.isFinite(restore.longitude) &&
+      Number.isFinite(restore.latitudeDelta) &&
+      Number.isFinite(restore.longitudeDelta) &&
+      restore.latitudeDelta > 0 &&
+      restore.longitudeDelta > 0
+    ) {
+      ignoreMapPressUntilRef.current = Date.now() + 500;
+      mapRef.current?.animateToRegion(restore, 400);
+    }
+  }, []);
+
+  const handleMapPress = useCallback(
+    (event: { nativeEvent?: { action?: string } }) => {
+      if (event.nativeEvent?.action === 'marker-press') {
+        return;
+      }
+      if (Date.now() < ignoreMapPressUntilRef.current) {
+        return;
+      }
+      clearPlaceSelection();
+    },
+    [clearPlaceSelection],
+  );
+
+  const handleMarkerPress = useCallback(
+    (event: { nativeEvent?: { id?: string } }) => {
+      const id = event.nativeEvent?.id?.trim();
+      if (!id) {
+        return;
+      }
+      const place =
+        placesRef.current.find((item) => item.id === id) ??
+        (externalPlace?.id === id ? externalPlace : null) ??
+        (focusedPlace?.id === id ? focusedPlace : null);
+      if (!place) {
+        return;
+      }
+      focusPlace(place);
+    },
+    [externalPlace, focusedPlace, focusPlace],
+  );
 
   const selectSearchResult = (location: MapLocation) => {
     if (debounceRef.current) {
@@ -504,6 +1100,9 @@ export function MapScreen({ navigation, route }: Props) {
     setSuggestions([]);
     setDropdownOpen(false);
     setExternalPlace(mapped);
+    setFocusedPlace(mapped);
+    ignoreMapPressUntilRef.current = Date.now() + 750;
+    rememberRegionBeforeFocus();
     setSelectedId(mapped.id);
     Keyboard.dismiss();
     moveTo({
@@ -524,8 +1123,8 @@ export function MapScreen({ navigation, route }: Props) {
       return;
     }
     void (async () => {
-      const results = await searchTravelPlaces(trimmed, {
-        type: tourTypeFromMapCategory(category),
+      const results = await searchMapTravelPlaces(trimmed, {
+        categories: selectedCategories,
         rows: 10,
       });
       if (results.length > 0) {
@@ -536,13 +1135,27 @@ export function MapScreen({ navigation, route }: Props) {
     })();
   };
 
-  const handleCategoryChange = (next: MapPlaceCategory | null) => {
+  const handleSelectAllCategories = () => {
     Keyboard.dismiss();
-    setCategory(next);
+    setSelectedCategories([]);
     setDropdownOpen(false);
     if (query.trim()) {
-      scheduleSearch(query, next);
+      scheduleSearch(query, []);
     }
+  };
+
+  const handleCategoryToggle = (item: MapPlaceCategory) => {
+    Keyboard.dismiss();
+    setSelectedCategories((prev) => {
+      const next = prev.includes(item)
+        ? prev.filter((entry) => entry !== item)
+        : [...prev, item];
+      if (query.trim()) {
+        scheduleSearch(query, next);
+      }
+      return next;
+    });
+    setDropdownOpen(false);
   };
 
   const handleMoveToUser = async () => {
@@ -575,7 +1188,8 @@ export function MapScreen({ navigation, route }: Props) {
   const toggleSaved = async (contentId: string) => {
     if (saveBusyId) return;
     setSaveBusyId(contentId);
-    const wasSaved = savedIds.includes(contentId);
+    const wasSaved =
+      contentId === sheetPlace?.id ? isSaved : isPlaceSaved(contentId);
     try {
       const tokens = await loadTokens();
       if (!tokens?.access) {
@@ -585,34 +1199,48 @@ export function MapScreen({ navigation, route }: Props) {
 
       if (wasSaved) {
         await unsavePlace(tokens.access, contentId);
-        setSavedPlaces((prev) => prev.filter((item) => item.contentId !== contentId));
-        if (selectedId === contentId) {
-          setSelectedId(null);
-        }
+        // 서버에서는 해제하되, 상세를 닫을 때까지 핀·시트는 유지
+        pendingUnsaveIdsRef.current.add(contentId);
+        bumpPendingUnsave();
+        setPlaceDetail((prev) =>
+          prev?.placeId === contentId ? { ...prev, saved: false } : prev,
+        );
       } else {
         const result = await savePlace(tokens.access, { contentId });
         if (result.saved) {
-          setSavedPlaces((prev) => {
-            if (prev.some((item) => item.contentId === result.contentId)) {
+          pendingUnsaveIdsRef.current.delete(contentId);
+          bumpPendingUnsave();
+          setPlaceDetail((prev) =>
+            prev?.placeId === contentId ? { ...prev, saved: true } : prev,
+          );
+          setViewportMarkers((prev) =>
+            prev.map((item) =>
+              item.placeId === result.contentId ? { ...item, saved: true } : item,
+            ),
+          );
+          setSavedMarkers((prev) => {
+            if (prev.some((item) => item.placeId === result.contentId)) {
               return prev;
             }
-            const selected = selectedPlace?.id === result.contentId ? selectedPlace : null;
+            const selected =
+              displayPlace?.id === result.contentId
+                ? displayPlace
+                : selectedPlace?.id === result.contentId
+                  ? selectedPlace
+                  : null;
+            if (!selected) {
+              return prev;
+            }
             return [
               {
-                userId: '',
-                contentId: result.contentId,
-                createdAt: new Date().toISOString(),
-                place: selected
-                  ? {
-                      contentId: selected.id,
-                      title: selected.name,
-                      addr1: selected.address,
-                      firstImage: null,
-                      lat: selected.latitude,
-                      lng: selected.longitude,
-                      contentTypeId: null,
-                    }
-                  : null,
+                placeId: result.contentId,
+                title: selected.name,
+                addr1: selected.address,
+                lat: selected.latitude,
+                lng: selected.longitude,
+                categoryCode:
+                  markerCategoryFromMapCategory(selected.category) ?? 'OTHER',
+                saved: true,
               },
               ...prev,
             ];
@@ -627,7 +1255,7 @@ export function MapScreen({ navigation, route }: Props) {
             ? '찜을 해제하지 못했어요.'
             : '찜하지 못했어요.';
       Alert.alert(wasSaved ? '찜 해제 실패' : '찜하기 실패', message);
-      void refreshSavedPlaces();
+      void refreshSavedMarkers();
     } finally {
       setSaveBusyId(null);
     }
@@ -646,21 +1274,20 @@ export function MapScreen({ navigation, route }: Props) {
         toolbarEnabled={false}
         onRegionChangeComplete={(region) => {
           persistPrefs({ region });
+          scheduleViewportFetch(region);
         }}
-        onPress={() => {
-          Keyboard.dismiss();
-          setSelectedId(null);
-          setDropdownOpen(false);
-        }}
+        onPress={handleMapPress}
+        onMarkerPress={handleMarkerPress}
       >
         {places.map((place) => {
           const active = place.id === selectedId;
-          const saved = savedIds.includes(place.id);
+          const saved = isPlaceSaved(place.id);
           // 네이티브 기본 핀: 선택 > 찜 > 일반
           const pinColor = active ? '#2F6BFF' : saved ? '#E11D48' : '#101828';
           return (
             <Marker
               key={place.id}
+              identifier={place.id}
               coordinate={{ latitude: place.latitude, longitude: place.longitude }}
               pinColor={pinColor}
               onPress={(event) => {
@@ -677,7 +1304,6 @@ export function MapScreen({ navigation, route }: Props) {
         </View>
       )}
 
-      {!sheetExpanded ? (
       <View style={[styles.topArea, { paddingTop: insets.top + spacing.sm }]} pointerEvents="box-none">
         <View style={styles.searchBlock}>
           <View style={styles.searchBar}>
@@ -725,7 +1351,7 @@ export function MapScreen({ navigation, route }: Props) {
                 {suggestions.map((item) => {
                   const id = item.contentId ?? item.name;
                   const alreadySaved = item.contentId
-                    ? savedIds.includes(item.contentId)
+                    ? item.saved || isPlaceSaved(item.contentId)
                     : false;
                   return (
                     <Pressable
@@ -768,175 +1394,210 @@ export function MapScreen({ navigation, route }: Props) {
         >
           <CategoryChip
             label="전체"
-            active={category === null}
-            onPress={() => handleCategoryChange(null)}
+            active={selectedCategories.length === 0}
+            onPress={handleSelectAllCategories}
           />
           {MAP_CATEGORIES.map((item) => (
             <CategoryChip
               key={item}
               label={item}
-              active={category === item}
-              onPress={() => handleCategoryChange(category === item ? null : item)}
+              active={selectedCategories.includes(item)}
+              onPress={() => handleCategoryToggle(item)}
             />
           ))}
         </ScrollView>
+
+        {viewportBBoxError ? (
+          <Text style={styles.mapHint}>지도를 조금 더 확대해 주세요.</Text>
+        ) : viewportTruncated || viewportCoveragePartial ? (
+          <Text style={styles.mapHint}>
+            {viewportTruncated
+              ? '장소가 많아 일부만 표시돼요. 지도를 확대해 보세요.'
+              : '이 배율에서는 일부 장소만 보여요. 지도를 확대해 보세요.'}
+          </Text>
+        ) : null}
       </View>
-      ) : null}
 
       <View
-        style={[
-          styles.bottomArea,
-          { paddingBottom: selectedPlace ? 0 : tabClearance },
-        ]}
+        style={[styles.locateArea, { paddingBottom: tabClearance }]}
         pointerEvents="box-none"
       >
-        {!sheetExpanded ? (
-          <View
-            style={[
-              styles.locateRow,
-              selectedPlace ? { marginBottom: spacing.sm } : null,
-            ]}
-            pointerEvents="box-none"
+        <View
+          style={[
+            styles.locateRow,
+            sheetPlace ? { marginBottom: spacing.sm } : null,
+          ]}
+          pointerEvents="box-none"
+        >
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel="현재 위치로 이동"
+            style={styles.locateButton}
+            onPress={() => {
+              void handleMoveToUser();
+            }}
           >
-            <Pressable
-              accessibilityRole="button"
-              accessibilityLabel="현재 위치로 이동"
-              style={styles.locateButton}
-              onPress={() => {
-                void handleMoveToUser();
-              }}
-            >
-              <Ionicons name="locate" size={18} color="#1E2939" />
-            </Pressable>
-          </View>
-        ) : null}
+            <Ionicons name="locate" size={18} color="#1E2939" />
+          </Pressable>
+        </View>
+      </View>
 
-        {selectedPlace ? (
-          <Animated.View
-            style={[
-              styles.sheet,
-              sheetExpanded ? styles.sheetFullscreen : null,
-              {
-                height: sheetHeight,
-                paddingTop: sheetExpanded ? insets.top : 0,
-                paddingBottom: sheetExpanded ? insets.bottom + spacing.md : tabClearance,
-              },
-            ]}
-          >
+      {sheetPlace ? (
+        <Animated.View
+          pointerEvents={selectedPlace ? 'auto' : 'none'}
+          style={[
+            styles.sheet,
+            {
+              top: sheetTop,
+              paddingBottom: tabClearance,
+            },
+          ]}
+        >
             <View
               accessibilityRole="adjustable"
               accessibilityLabel={
-                sheetExpanded ? '시트 줄이기' : '시트 전체 화면으로 펼치기'
+                sheetExpanded ? '시트 줄이기' : '시트 더 펼치기'
               }
-              accessibilityHint="위로 올리면 전체 화면, 아래로 내리면 접힙니다"
+              accessibilityHint="위로 올리면 더 펼쳐지고, 아래로 내리면 접힙니다"
               style={styles.sheetHandleHit}
               {...sheetPanResponder.panHandlers}
             >
               <View style={styles.sheetHandle} />
             </View>
 
-            <View style={styles.cardHeader}>
-              <View style={styles.cardHeaderText}>
-                <View style={styles.cardTitleRow}>
-                  <Text style={styles.cardTitle} numberOfLines={1}>
-                    {selectedPlace.name}
-                  </Text>
-                  <View style={styles.cardBadge}>
-                    <Text style={styles.cardBadgeText}>{selectedPlace.category}</Text>
-                  </View>
-                  <Pressable
-                    accessibilityRole="button"
-                    accessibilityLabel={isSaved ? '찜 해제' : '찜하기'}
-                    disabled={saveBusyId === selectedPlace.id}
-                    hitSlop={8}
-                    style={[
-                      styles.heartButton,
-                      saveBusyId === selectedPlace.id && styles.heartButtonBusy,
-                    ]}
-                    onPress={() => {
-                      void toggleSaved(selectedPlace.id);
-                    }}
-                  >
-                    <Ionicons
-                      name={isSaved ? 'heart' : 'heart-outline'}
-                      size={20}
-                      color={isSaved ? '#E11D48' : '#6A7282'}
-                    />
-                  </Pressable>
-                </View>
-                <Text style={styles.cardAddress} numberOfLines={1}>
-                  {selectedPlace.address
-                    ? selectedPlace.address
-                    : '주소 정보가 없어요'}
-                </Text>
-              </View>
-              <Pressable
-                accessibilityRole="button"
-                accessibilityLabel="닫기"
-                hitSlop={8}
-                style={styles.cardClose}
-                onPress={() => setSelectedId(null)}
-              >
-                <Ionicons name="close" size={18} color="#6A7282" />
-              </Pressable>
-            </View>
-
-            {selectedPlace.photoCount > 0 ? (
-            <View style={styles.photoRow}>
-              {Array.from({ length: Math.min(selectedPlace.photoCount, 3) }).map((_, index) => {
-                const isOverflow = index === 2 && selectedPlace.photoCount > 3;
-                return (
-                  <View key={index} style={styles.photoBox}>
-                    {isOverflow ? (
-                      <Text style={styles.photoOverflowText}>
-                        +{selectedPlace.photoCount - 2}장
-                      </Text>
-                    ) : (
-                      <Ionicons name="image-outline" size={22} color="#9CA3AF" />
-                    )}
-                  </View>
-                );
-              })}
-            </View>
-            ) : null}
-
-            <View style={styles.diarySectionHeader}>
-              <Text style={styles.diarySectionTitle}>관련 다이어리</Text>
-              <Text style={styles.diarySectionCount}>{relatedDiaries.length}개</Text>
-            </View>
-
             <ScrollView
-              style={styles.diaryList}
-              contentContainerStyle={styles.diaryListContent}
+              style={styles.sheetBody}
+              contentContainerStyle={styles.sheetBodyContent}
               showsVerticalScrollIndicator={false}
-              nestedScrollEnabled
               keyboardShouldPersistTaps="handled"
+              nestedScrollEnabled
             >
+              <View style={styles.cardHeader}>
+                <View style={styles.cardHeaderText}>
+                  <View style={styles.cardTitleRow}>
+                    <Text style={styles.cardTitle} numberOfLines={1}>
+                      {displayPlace?.name ?? sheetPlace.name}
+                    </Text>
+                    <View style={styles.cardBadge}>
+                      <Text style={styles.cardBadgeText}>
+                        {displayPlace?.category ?? sheetPlace.category}
+                      </Text>
+                    </View>
+                    <Pressable
+                      accessibilityRole="button"
+                      accessibilityLabel={isSaved ? '찜 해제' : '찜하기'}
+                      disabled={saveBusyId === sheetPlace.id || placeUnavailable}
+                      hitSlop={8}
+                      style={[
+                        styles.heartButton,
+                        saveBusyId === sheetPlace.id && styles.heartButtonBusy,
+                      ]}
+                      onPress={() => {
+                        void toggleSaved(sheetPlace.id);
+                      }}
+                    >
+                      <Ionicons
+                        name={isSaved ? 'heart' : 'heart-outline'}
+                        size={20}
+                        color={isSaved ? '#E11D48' : '#6A7282'}
+                      />
+                    </Pressable>
+                  </View>
+                  <Text style={styles.cardAddress} numberOfLines={2}>
+                    {(displayPlace?.address || sheetPlace.address)
+                      ? displayPlace?.address || sheetPlace.address
+                      : '주소 정보가 없어요'}
+                  </Text>
+                  {distanceLabel ? (
+                    <Text style={styles.cardDistance}>현재 위치에서 {distanceLabel}</Text>
+                  ) : null}
+                  {placeUnavailable ? (
+                    <Text style={styles.cardUnavailable}>
+                      지금은 이용할 수 없는 장소예요.
+                    </Text>
+                  ) : placeDetailLoading ? (
+                    <Text style={styles.cardDistance}>상세 정보 불러오는 중…</Text>
+                  ) : null}
+                </View>
+                <Pressable
+                  accessibilityRole="button"
+                  accessibilityLabel="닫기"
+                  hitSlop={8}
+                  style={styles.cardClose}
+                  onPress={clearPlaceSelection}
+                >
+                  <Ionicons name="close" size={18} color="#6A7282" />
+                </Pressable>
+              </View>
+
+              {sheetImages.length > 0 ? (
+                <ScrollView
+                  horizontal
+                  showsHorizontalScrollIndicator={false}
+                  contentContainerStyle={styles.photoRow}
+                >
+                  {sheetImages.slice(0, 6).map((uri, index) => {
+                    const overflow =
+                      index === 5 && sheetImages.length > 6
+                        ? sheetImages.length - 5
+                        : 0;
+                    return (
+                      <View key={`${uri}-${index}`} style={styles.photoBox}>
+                        <Image source={{ uri }} style={styles.photoImage} />
+                        {overflow > 0 ? (
+                          <View style={styles.photoOverflow}>
+                            <Text style={styles.photoOverflowText}>+{overflow}장</Text>
+                          </View>
+                        ) : null}
+                      </View>
+                    );
+                  })}
+                </ScrollView>
+              ) : null}
+
+              <View style={styles.diarySectionHeader}>
+                <Text style={styles.diarySectionTitle}>관련 다이어리</Text>
+                <Text style={styles.diarySectionCount}>{sheetDiaryCount}개</Text>
+              </View>
+
               {relatedLoading ? (
                 <Text style={styles.diaryEmptyText}>불러오는 중…</Text>
               ) : relatedDiaries.length === 0 ? (
                 <Text style={styles.diaryEmptyText}>이 장소의 공개 다이어리가 아직 없어요.</Text>
               ) : (
                 relatedDiaries.map((diary) => (
-                  <RelatedDiaryRow key={diary.id} diary={diary} />
+                  <RelatedDiaryRow
+                    key={diary.id}
+                    diary={diary}
+                    busy={openingDiaryId === diary.id}
+                    onPress={() => {
+                      void openRelatedDiary(diary);
+                    }}
+                  />
                 ))
               )}
             </ScrollView>
           </Animated.View>
         ) : null}
-      </View>
     </View>
   );
 }
 
-function RelatedDiaryRow({ diary }: { diary: PlaceRelatedDiary }) {
+function RelatedDiaryRow({
+  diary,
+  busy,
+  onPress,
+}: {
+  diary: PlaceRelatedDiary;
+  busy?: boolean;
+  onPress: () => void;
+}) {
   return (
     <Pressable
       accessibilityRole="button"
-      style={styles.diaryRow}
-      onPress={() => {
-        // TODO: 공개 다이어리 보기 연동
-      }}
+      disabled={busy}
+      style={[styles.diaryRow, busy && styles.diaryRowBusy]}
+      onPress={onPress}
     >
       <View style={styles.diaryCover}>
         {diary.coverThumbUrl ? (
@@ -961,7 +1622,7 @@ function RelatedDiaryRow({ diary }: { diary: PlaceRelatedDiary }) {
           </Text>
           <View style={styles.diarySaveCount}>
             <Ionicons name="heart" size={12} color="#99A1AF" />
-            <Text style={styles.diarySaveCountText}>{diary.saveCount}</Text>
+            <Text style={styles.diarySaveCountText}>{diary.likeCount}</Text>
           </View>
         </View>
       </View>
@@ -996,7 +1657,7 @@ const styles = StyleSheet.create({
     backgroundColor: '#F8F9FA',
   },
   mapLoading: {
-    ...StyleSheet.absoluteFillObject,
+    ...StyleSheet.absoluteFill,
     alignItems: 'center',
     justifyContent: 'center',
     backgroundColor: '#F8F9FA',
@@ -1006,10 +1667,12 @@ const styles = StyleSheet.create({
     top: 0,
     left: 0,
     right: 0,
+    zIndex: 10,
+    elevation: 4,
   },
   searchBlock: {
     marginHorizontal: spacing.lg,
-    zIndex: 20,
+    zIndex: 1,
   },
   searchBar: {
     height: 48,
@@ -1082,6 +1745,13 @@ const styles = StyleSheet.create({
     paddingTop: spacing.sm,
     paddingBottom: spacing.xs,
   },
+  mapHint: {
+    paddingHorizontal: spacing.lg,
+    paddingBottom: spacing.xs,
+    fontSize: 11,
+    lineHeight: 15,
+    color: '#99A1AF',
+  },
   chip: {
     height: 30,
     paddingHorizontal: spacing.md,
@@ -1109,11 +1779,13 @@ const styles = StyleSheet.create({
   chipTextActive: {
     color: colors.white,
   },
-  bottomArea: {
+  locateArea: {
     position: 'absolute',
     left: 0,
     right: 0,
     bottom: 0,
+    zIndex: 15,
+    elevation: 6,
   },
   locateRow: {
     alignItems: 'flex-end',
@@ -1136,6 +1808,10 @@ const styles = StyleSheet.create({
     elevation: 4,
   },
   sheet: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    bottom: 0,
     width: '100%',
     paddingHorizontal: spacing.lg,
     paddingTop: 0,
@@ -1148,27 +1824,28 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.14,
     shadowRadius: 16,
     shadowOffset: { width: 0, height: -4 },
-    elevation: 14,
+    elevation: 16,
+    zIndex: 20,
     overflow: 'hidden',
-  },
-  sheetFullscreen: {
-    borderTopLeftRadius: 0,
-    borderTopRightRadius: 0,
-    borderTopWidth: 0,
-    elevation: 24,
-    zIndex: 30,
   },
   sheetHandleHit: {
     alignItems: 'center',
     justifyContent: 'center',
-    paddingTop: spacing.sm,
-    paddingBottom: spacing.md,
+    // iOS HIG 최소 터치 목표 44pt — 회색 바는 얇게, 터치만 확보
+    minHeight: 44,
   },
   sheetHandle: {
     width: 40,
     height: 4,
     borderRadius: 2,
     backgroundColor: '#D1D5DB',
+  },
+  sheetBody: {
+    flex: 1,
+    minHeight: 0,
+  },
+  sheetBodyContent: {
+    paddingBottom: spacing.sm,
   },
   cardHeader: {
     flexDirection: 'row',
@@ -1217,6 +1894,18 @@ const styles = StyleSheet.create({
     lineHeight: 16,
     color: '#6A7282',
   },
+  cardDistance: {
+    marginTop: 4,
+    fontSize: 12,
+    lineHeight: 16,
+    color: '#99A1AF',
+  },
+  cardUnavailable: {
+    marginTop: 4,
+    fontSize: 12,
+    lineHeight: 16,
+    color: '#DC2626',
+  },
   cardClose: {
     width: 28,
     height: 28,
@@ -1231,19 +1920,30 @@ const styles = StyleSheet.create({
     paddingTop: spacing.md,
   },
   photoBox: {
-    width: 64,
-    height: 64,
+    width: 72,
+    height: 72,
     borderRadius: radii.md,
+    overflow: 'hidden',
     alignItems: 'center',
     justifyContent: 'center',
     backgroundColor: '#F3F4F6',
     borderWidth: StyleSheet.hairlineWidth,
     borderColor: '#E5E7EB',
   },
+  photoImage: {
+    width: '100%',
+    height: '100%',
+  },
+  photoOverflow: {
+    ...StyleSheet.absoluteFill,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'rgba(15, 23, 42, 0.45)',
+  },
   photoOverflowText: {
     fontSize: 12,
     fontWeight: '600',
-    color: '#4A5565',
+    color: colors.white,
   },
   diarySectionHeader: {
     flexDirection: 'row',
@@ -1262,14 +1962,6 @@ const styles = StyleSheet.create({
     fontWeight: '500',
     color: '#6A7282',
   },
-  diaryList: {
-    flex: 1,
-    minHeight: 0,
-  },
-  diaryListContent: {
-    paddingBottom: spacing.sm,
-    flexGrow: 1,
-  },
   diaryEmptyText: {
     paddingVertical: spacing.lg,
     fontSize: 13,
@@ -1283,6 +1975,9 @@ const styles = StyleSheet.create({
     paddingVertical: spacing.md,
     borderTopWidth: StyleSheet.hairlineWidth,
     borderTopColor: '#F3F4F6',
+  },
+  diaryRowBusy: {
+    opacity: 0.55,
   },
   diaryCover: {
     width: 84,

@@ -254,7 +254,7 @@ function NaturalVideoPreview({
         style={styles.fill}
         contentFit="contain"
         nativeControls={nativeControls}
-        allowsFullscreen={false}
+        fullscreenOptions={{ enable: false }}
       />
       <View style={styles.badge}>
         <Text style={styles.badgeText}>VIDEO</Text>
@@ -337,7 +337,7 @@ function VideoPreview({
             style={innerStyle}
             contentFit="cover"
             nativeControls={nativeControls}
-            allowsFullscreen={false}
+            fullscreenOptions={{ enable: false }}
           />
         )}
       </LandscapeFrame>
@@ -351,7 +351,7 @@ function VideoPreview({
         style={styles.fill}
         contentFit="cover"
         nativeControls={nativeControls}
-        allowsFullscreen={false}
+        fullscreenOptions={{ enable: false }}
       />
       <View style={styles.badge}>
         <Text style={styles.badgeText}>VIDEO</Text>

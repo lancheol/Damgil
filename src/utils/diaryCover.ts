@@ -10,12 +10,12 @@ import {
   DiaryPhoto,
 } from '../types/diary';
 import { spacing } from '../theme';
-import { DECOR_FONTS, DECOR_STICKER_EMOJIS, getDecorFontStyle } from './decorAssets';
+import { DECOR_FONTS, getDecorFontStyle } from './decorAssets';
 import { createPhotoLayerId } from './diaryPageDecoration';
+import { ensureDecorLayerZIndexes, normalizeDecorLayerBundle } from './decorLayerOrder';
 import { normalizeCropRect } from './diaryTextLayers';
 
 export const COVER_FONTS = DECOR_FONTS;
-export const COVER_STICKER_EMOJIS = DECOR_STICKER_EMOJIS;
 
 export const COVER_TITLE_LAYER_ID = '__cover_title__';
 export const DEFAULT_COVER_COLOR = '#1A1A1A';
@@ -90,11 +90,18 @@ function normalizeCoverPhotos(photos: DecorPhotoLayer[] | undefined): DecorPhoto
     scale: typeof item.scale === 'number' ? item.scale : 0.72,
     rotation: typeof item.rotation === 'number' ? item.rotation : 0,
     cropRect: item.cropRect ? normalizeCropRect(item.cropRect) : null,
+    zIndex: typeof item.zIndex === 'number' ? item.zIndex : undefined,
   }));
 }
 
 function normalizeCoverTexts(texts: DecorTextLayer[] | undefined): DecorTextLayer[] {
-  return Array.isArray(texts) ? texts : [];
+  if (!Array.isArray(texts)) {
+    return [];
+  }
+  return texts.map((item) => ({
+    ...item,
+    zIndex: typeof item.zIndex === 'number' ? item.zIndex : undefined,
+  }));
 }
 
 export function createEmptyCover(title: string): DiaryCover {
@@ -114,13 +121,12 @@ export function createEmptyCover(title: string): DiaryCover {
   };
 }
 
-/** 표지에 꾸미기 레이어(사진·스티커·텍스트)가 있는지 */
+/** 표지에 꾸미기 레이어(사진·텍스트)가 있는지 */
 export function hasCoverDecorationLayout(cover: DiaryCover | null | undefined): boolean {
   if (!cover) return false;
   return Boolean(
     cover.coverPhotoId ||
       cover.photos?.length ||
-      cover.stickers?.length ||
       cover.texts?.length,
   );
 }
@@ -188,6 +194,11 @@ export function normalizeCover(cover: DiaryCover | null | undefined, fallbackTit
   if (!cover) {
     return null;
   }
+  const ensured = ensureDecorLayerZIndexes({
+    photos: normalizeCoverPhotos(cover.photos),
+    texts: normalizeCoverTexts(cover.texts),
+    stickers: [],
+  });
   return {
     coverPhotoId: cover.coverPhotoId ?? null,
     title: cover.title?.trim() || fallbackTitle,
@@ -200,10 +211,26 @@ export function normalizeCover(cover: DiaryCover | null | undefined, fallbackTit
       typeof cover.titleColor === 'string' && cover.titleColor.trim()
         ? cover.titleColor.trim()
         : undefined,
-    stickers: Array.isArray(cover.stickers) ? cover.stickers : [],
-    photos: normalizeCoverPhotos(cover.photos),
-    texts: normalizeCoverTexts(cover.texts),
+    stickers: [],
+    photos: ensured.photos,
+    texts: ensured.texts,
     backgroundColor: cover.backgroundColor?.trim() || DEFAULT_COVER_COLOR,
     updatedAt: cover.updatedAt ?? new Date().toISOString(),
+  };
+}
+
+/** 저장 직전: 레이어 z를 1…N으로 압축한 표지 */
+export function buildCoverForSave(cover: DiaryCover): DiaryCover {
+  const normalized = normalizeDecorLayerBundle({
+    photos: cover.photos ?? [],
+    texts: cover.texts ?? [],
+    stickers: [],
+  });
+  return {
+    ...cover,
+    photos: normalized.photos,
+    texts: normalized.texts,
+    stickers: [],
+    updatedAt: new Date().toISOString(),
   };
 }

@@ -300,7 +300,7 @@ const styles = StyleSheet.create({
     backgroundColor: colors.black,
   },
   controlsLayer: {
-    ...StyleSheet.absoluteFillObject,
+    ...StyleSheet.absoluteFill,
     zIndex: 20,
     elevation: 20,
   },

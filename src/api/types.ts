@@ -81,6 +81,37 @@ export type DeleteAccountResponseDto = {
   job: AccountDeletionJobDto;
 };
 
+/** POST /blocks */
+export type CreateBlockRequest = {
+  userId: number;
+};
+
+/** GET /blocks — Swagger 스키마 비어 있어 정규화용 */
+export type BlockedUserDto = {
+  userId: string;
+  nickname: string | null;
+  createdAt: string | null;
+};
+
+/** POST /reports */
+export type ReportTargetType = 'trip' | 'comment' | 'user';
+
+export type ReportReason =
+  | 'inappropriate'
+  | 'privacy'
+  | 'copyright'
+  | 'abuse'
+  | 'false_place'
+  | 'spam'
+  | 'etc';
+
+export type CreateReportRequest = {
+  targetType: ReportTargetType;
+  targetId: number;
+  reason: ReportReason;
+  detail?: string;
+};
+
 export type TripVisibility = 'private' | 'friends' | 'public';
 
 export type TripStatus = 'recording' | 'editing' | 'completed';
@@ -351,6 +382,96 @@ export type SavedPlaceItemDto = {
   place: PlaceCacheSummaryDto | null;
 };
 
+export type SavedMarkerCategoryCode =
+  | 'ATTRACTION'
+  | 'CULTURE'
+  | 'FOOD'
+  | 'CAFE'
+  | 'ACTIVITY'
+  | 'SHOPPING'
+  | 'OTHER';
+
+/** GET /map/saved-markers */
+export type SavedMarkerItemDto = {
+  placeId: string;
+  title: string;
+  addr1: string;
+  lat: number;
+  lng: number;
+  categoryCode: SavedMarkerCategoryCode;
+  saved: boolean;
+};
+
+export type SavedMarkersResponseDto = {
+  items: SavedMarkerItemDto[];
+  total: number;
+};
+
+/** GET /map/places — 지도 bbox 내 장소 */
+export type MapPlacesResponseDto = {
+  items: SavedMarkerItemDto[];
+  total: number;
+  truncated: boolean;
+  source?: string;
+  coverage?: string;
+  activeFilter?: boolean;
+};
+
+/** GET /map/search */
+export type MapSearchResponseDto = {
+  total: number;
+  items: SavedMarkerItemDto[];
+};
+
+/**
+ * GET /map/places/:placeId — 지도 장소 상세 (MAP-BE-005/009/015)
+ * `/places/:id` 대비 saved·diaryCount·distanceKm·좌표 포함
+ */
+export type MapPlaceDetailResponseDto = {
+  common: Record<string, unknown> | null;
+  intro: Record<string, unknown> | null;
+  images: string[];
+  related: unknown[];
+  course: unknown[];
+  placeId: string;
+  lat: number | null;
+  lng: number | null;
+  categoryCode: SavedMarkerCategoryCode | string;
+  saved: boolean;
+  /** PUBLIC + COMPLETED 방문 다이어리 수 */
+  diaryCount: number;
+  /** 현재 위치(lat/lng)를 보낸 경우에만 직선 거리(km). 없으면 null/미포함 */
+  distanceKm?: number | null;
+  degraded?: boolean;
+};
+
+/** GET /map/places/:placeId/diaries — 장소 방문 다이어리 개인화 조회 */
+export type PlaceDiaryItemDto = {
+  tripId: string;
+  title: string;
+  thumbnailUrl1: string | null;
+  authorNickname: string;
+  publishedAt: string;
+  likeCount: number;
+  relevanceScore: number;
+};
+
+export type PlaceDiarySignalsDto = {
+  like: string;
+  save: string;
+  view: string;
+};
+
+export type PlaceDiariesResponseDto = {
+  items: PlaceDiaryItemDto[];
+  total: number;
+  page: number;
+  pageSize: number;
+  hasNext: boolean;
+  signals?: PlaceDiarySignalsDto;
+  damping?: boolean;
+};
+
 /** POST /settings/feedback */
 export type FeedbackType =
   | 'service_opinion'
@@ -543,6 +664,68 @@ export type FestivalDetailResponseDto = {
   related: PlaceRelatedDto[];
   course: unknown[];
   degraded?: boolean;
+};
+
+export type RegionSearchKind = 'region' | 'emd';
+export type RegionSearchLevel = 'sido' | 'sgg' | 'emd';
+
+export type RegionSearchItemDto = {
+  kind: RegionSearchKind;
+  regionId: string;
+  level: RegionSearchLevel;
+  name: string;
+  sidoName: string;
+  sggName?: string;
+  emdName?: string;
+};
+
+export type RegionSearchResponseDto = {
+  query: string;
+  page: number;
+  pageSize: number;
+  total: number;
+  hasNext: boolean;
+  items: RegionSearchItemDto[];
+};
+
+export type RegionFilterChildDto = {
+  id: string;
+  name: string;
+};
+
+export type RegionFilterSidoDto = {
+  id: string;
+  name: string;
+  children: RegionFilterChildDto[];
+};
+
+export type RegionFilterResponseDto = {
+  items: RegionFilterSidoDto[];
+};
+
+export type FestivalSearchItemDto = {
+  id: string;
+  externalId: string;
+  name: string;
+  address: string | null;
+  regionId: string | null;
+  regionName: string | null;
+  sidoName: string | null;
+  emdName: string | null;
+  riName: string | null;
+  lat: number | null;
+  lng: number | null;
+  eventStartDate: string | null;
+  eventEndDate: string | null;
+};
+
+export type FestivalSearchResponseDto = {
+  query: string;
+  page: number;
+  pageSize: number;
+  total: number;
+  hasNext: boolean;
+  items: FestivalSearchItemDto[];
 };
 
 export class ApiError extends Error {

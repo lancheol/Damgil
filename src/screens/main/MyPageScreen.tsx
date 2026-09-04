@@ -2,12 +2,13 @@ import { Ionicons } from '@expo/vector-icons';
 import { CompositeScreenProps, useFocusEffect } from '@react-navigation/native';
 import { BottomTabScreenProps } from '@react-navigation/bottom-tabs';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
-import { useCallback, useMemo, useRef, useState } from 'react';
+import { useCallback, useMemo, useRef, useState, memo } from 'react';
 import {
   ActivityIndicator,
   Alert,
   Dimensions,
   FlatList,
+  ListRenderItem,
   Modal,
   Pressable,
   StyleSheet,
@@ -155,206 +156,228 @@ export function MyPageScreen({ navigation }: Props) {
     }, [segment, loadLiked]),
   );
 
-  const openDiary = (diary: Diary) => {
-    // 표지만 임시저장인 경우 → 표지 편집으로
-    const isDraftCover = Boolean(diary.coverDraft) && !diary.cover && !isDiaryPublished(diary);
-    if (isDraftCover) {
-      navigation.navigate('DiaryCoverEdit', { diaryId: diary.id });
-      return;
-    }
-    // 라이브러리 카드 탭 = 게시물 보기. 꾸미기 재진입은 메뉴 「수정」만.
-    navigation.navigate({
-      name: 'DiaryEdit',
-      params: {
-        diaryId: diary.id,
-        mode: 'view',
-        republish: false,
-      },
-      merge: false,
-    });
-  };
-
-  const editDiary = async (diary: Diary) => {
-    if (editBusy) return;
-    setEditBusy(true);
-    try {
-      const wasPublished = isDiaryPublished(diary);
-      const ok = await reopenDiaryForEdit(diary.id);
-      if (!ok) return;
-      navigation.navigate({
-        name: 'DiaryEdit',
-        params: {
-          diaryId: diary.id,
-          mode: 'edit',
-          republish: wasPublished,
-        },
-        merge: false,
-      });
-    } finally {
-      setEditBusy(false);
-    }
-  };
-
-  const openLikedCard = async (card: FeedDiaryCard) => {
-    if (openingLikedId) return;
-    setOpeningLikedId(card.id);
-    try {
-      const result = await openPublicDiary(card.id);
-      if (result.status !== 'ok') return;
-      navigation.navigate('DiaryEdit', {
-        diaryId: result.diary.id,
-        mode: 'view',
-        liked: true,
-        likeCount: card.likeCount,
-        commentCount: card.commentCount,
-      });
-    } finally {
-      setOpeningLikedId(null);
-    }
-  };
-
-  const confirmDelete = (diary: Diary) => {
-    const title = getEffectiveCover(diary).title?.trim() || diary.name;
-    Alert.alert('다이어리 삭제', `'${title}'을(를) 삭제할까요?\n기록한 사진과 꾸미기가 모두 사라집니다.`, [
-      { text: '취소', style: 'cancel' },
-      {
-        text: '삭제',
-        style: 'destructive',
-        onPress: () => {
-          void deleteDiary(diary.id);
-        },
-      },
-    ]);
-  };
-
-  const handleToggleVisibility = async (diary: Diary) => {
-    if (visibilityBusy) {
-      return;
-    }
-    const isPublic = (diary.visibility ?? 'private') === 'public';
-    const next = isPublic ? 'private' : 'public';
-    setVisibilityBusy(true);
-    try {
-      const ok = await updateDiaryVisibility(diary.id, next);
-      if (ok) {
-        setMenuDiary(null);
+  const openDiary = useCallback(
+    (diary: Diary) => {
+      // 표지만 임시저장인 경우 → 표지 편집으로
+      const isDraftCover = Boolean(diary.coverDraft) && !diary.cover && !isDiaryPublished(diary);
+      if (isDraftCover) {
+        navigation.navigate('DiaryCoverEdit', { diaryId: diary.id });
+        return;
       }
-    } finally {
-      setVisibilityBusy(false);
-    }
-  };
+      // 라이브러리 카드 탭 = 게시물 보기. 꾸미기 재진입은 메뉴 「수정」만.
+      navigation.navigate(
+        'DiaryEdit',
+        {
+          diaryId: diary.id,
+          mode: 'view',
+          republish: false,
+        },
+        { merge: false },
+      );
+    },
+    [navigation],
+  );
 
-  const renderDiaryCard = ({ item }: { item: Diary }) => {
-    const cover = getEffectiveCover(item);
-    const likeCount = item.likeCount ?? 0;
-    const title = cover.title?.trim() || item.name;
-    const isDraft =
-      !isDiaryPublished(item) &&
-      (item.editStatus === 'DRAFT' || (Boolean(item.coverDraft) && !item.cover));
-    const isPrivate = (item.visibility ?? 'private') === 'private';
+  const editDiary = useCallback(
+    async (diary: Diary) => {
+      if (editBusy) return;
+      setEditBusy(true);
+      try {
+        const wasPublished = isDiaryPublished(diary);
+        const ok = await reopenDiaryForEdit(diary.id);
+        if (!ok) return;
+        navigation.navigate(
+          'DiaryEdit',
+          {
+            diaryId: diary.id,
+            mode: 'edit',
+            republish: wasPublished,
+          },
+          { merge: false },
+        );
+      } finally {
+        setEditBusy(false);
+      }
+    },
+    [editBusy, navigation, reopenDiaryForEdit],
+  );
 
-    return (
-      <Pressable accessibilityRole="button" onPress={() => openDiary(item)} style={styles.card}>
-        <View style={styles.thumb}>
-          <CoverThumb diary={item} />
-          <View style={styles.badgeRow}>
-            {isPrivate ? (
-              <View style={styles.badge}>
-                <Text style={styles.badgeText}>비공개</Text>
-              </View>
-            ) : null}
-            {isDraft ? (
-              <View style={[styles.badge, styles.badgeDraft]}>
-                <Text style={styles.badgeText}>임시 저장</Text>
-              </View>
-            ) : null}
-          </View>
-          <View style={styles.likeBadge}>
-            <MyPageHeartIcon size={10} />
-            <Text style={styles.likeCount}>{likeCount}</Text>
-          </View>
+  const openingLikedIdRef = useRef<string | null>(null);
 
-          <Pressable
-            accessibilityRole="button"
-            accessibilityLabel={`${title} 더보기`}
-            hitSlop={8}
-            onPress={() => setMenuDiary(item)}
-            style={({ pressed }) => [styles.moreButton, pressed && styles.pressed]}
-          >
-            <Ionicons name="ellipsis-vertical" size={16} color={colors.white} />
-          </Pressable>
-        </View>
-      </Pressable>
-    );
-  };
+  const openLikedCard = useCallback(
+    async (card: FeedDiaryCard) => {
+      if (openingLikedIdRef.current) return;
+      openingLikedIdRef.current = card.id;
+      setOpeningLikedId(card.id);
+      try {
+        const result = await openPublicDiary(card.id);
+        if (result.status !== 'ok') return;
+        navigation.navigate('DiaryEdit', {
+          diaryId: result.diary.id,
+          mode: 'view',
+          liked: true,
+          likeCount: card.likeCount,
+          commentCount: card.commentCount,
+        });
+      } finally {
+        openingLikedIdRef.current = null;
+        setOpeningLikedId(null);
+      }
+    },
+    [navigation, openPublicDiary],
+  );
 
-  const renderLikedCard = ({ item }: { item: FeedDiaryCard }) => {
-    const stub = feedCardToDiaryStub(item);
-    return (
-      <Pressable
-        accessibilityRole="button"
-        disabled={openingLikedId === item.id}
-        onPress={() => {
-          void openLikedCard(item);
-        }}
-        style={({ pressed }) => [styles.card, pressed && styles.pressed]}
-      >
-        <View style={styles.thumb}>
-          <CoverThumb diary={stub} />
-          <View style={styles.likeBadge}>
-            <MyPageHeartIcon size={10} />
-            <Text style={styles.likeCount}>{item.likeCount}</Text>
-          </View>
-        </View>
-        <Text style={styles.cardCaption} numberOfLines={1}>
-          {item.title}
-        </Text>
-      </Pressable>
-    );
-  };
+  const confirmDelete = useCallback(
+    (diary: Diary) => {
+      const title = getEffectiveCover(diary).title?.trim() || diary.name;
+      Alert.alert(
+        '다이어리 삭제',
+        `'${title}'을(를) 삭제할까요?\n기록한 사진과 꾸미기가 모두 사라집니다.`,
+        [
+          { text: '취소', style: 'cancel' },
+          {
+            text: '삭제',
+            style: 'destructive',
+            onPress: () => {
+              void deleteDiary(diary.id);
+            },
+          },
+        ],
+      );
+    },
+    [deleteDiary],
+  );
 
-  const listHeader = (
-    <View>
-      <View style={styles.profileRow}>
-        <ProfileAvatar uri={user?.avatarUri} size={64} />
-        <View style={styles.profileCopy}>
-          <Text style={styles.username}>{username}</Text>
-          <Text style={styles.bio} numberOfLines={2}>
-            {bio}
-          </Text>
-        </View>
-      </View>
+  const handleToggleVisibility = useCallback(
+    async (diary: Diary) => {
+      if (visibilityBusy) {
+        return;
+      }
+      const isPublic = (diary.visibility ?? 'private') === 'public';
+      const next = isPublic ? 'private' : 'public';
+      setVisibilityBusy(true);
+      try {
+        const ok = await updateDiaryVisibility(diary.id, next);
+        if (ok) {
+          setMenuDiary(null);
+        }
+      } finally {
+        setVisibilityBusy(false);
+      }
+    },
+    [updateDiaryVisibility, visibilityBusy],
+  );
 
-      <Pressable
-        accessibilityRole="button"
-        accessibilityLabel="프로필 편집하기"
-        onPress={() => navigation.navigate('ProfileEdit')}
-        style={({ pressed }) => [styles.editProfileBtn, pressed && styles.pressed]}
-      >
-        <Text style={styles.editProfileText}>프로필 편집하기</Text>
-      </Pressable>
+  const renderDiaryCard = useCallback<ListRenderItem<Diary>>(
+    ({ item }) => {
+      const cover = getEffectiveCover(item);
+      const likeCount = item.likeCount ?? 0;
+      const title = cover.title?.trim() || item.name;
+      const isDraft =
+        !isDiaryPublished(item) &&
+        (item.editStatus === 'DRAFT' || (Boolean(item.coverDraft) && !item.cover));
+      const isPrivate = (item.visibility ?? 'private') === 'private';
 
-      <View style={styles.profileDivider} />
+      return (
+        <Pressable accessibilityRole="button" onPress={() => openDiary(item)} style={styles.card}>
+          <View style={styles.thumb}>
+            <CoverThumb diary={item} />
+            <View style={styles.badgeRow}>
+              {isPrivate ? (
+                <View style={styles.badge}>
+                  <Text style={styles.badgeText}>비공개</Text>
+                </View>
+              ) : null}
+              {isDraft ? (
+                <View style={[styles.badge, styles.badgeDraft]}>
+                  <Text style={styles.badgeText}>임시 저장</Text>
+                </View>
+              ) : null}
+            </View>
+            <View style={styles.likeBadge}>
+              <MyPageHeartIcon size={10} />
+              <Text style={styles.likeCount}>{likeCount}</Text>
+            </View>
 
-      <View style={styles.segmentRow}>
-        {SEGMENTS.map((item) => {
-          const active = segment === item.id;
-          return (
             <Pressable
-              key={item.id}
               accessibilityRole="button"
-              accessibilityState={{ selected: active }}
-              onPress={() => setSegment(item.id)}
-              style={[styles.segmentChip, active && styles.segmentChipActive]}
+              accessibilityLabel={`${title} 더보기`}
+              hitSlop={8}
+              onPress={() => setMenuDiary(item)}
+              style={({ pressed }) => [styles.moreButton, pressed && styles.pressed]}
             >
-              <Text style={[styles.segmentText, active && styles.segmentTextActive]}>
-                {item.label}
-              </Text>
+              <Ionicons name="ellipsis-vertical" size={16} color={colors.white} />
             </Pressable>
-          );
-        })}
+          </View>
+        </Pressable>
+      );
+    },
+    [openDiary],
+  );
+
+  const handleLikedCardPress = useCallback(
+    (card: FeedDiaryCard) => {
+      void openLikedCard(card);
+    },
+    [openLikedCard],
+  );
+
+  const renderLikedCard = useCallback<ListRenderItem<FeedDiaryCard>>(
+    ({ item }) => (
+      <LikedDiaryCard
+        card={item}
+        busy={openingLikedId === item.id}
+        onPressCard={handleLikedCardPress}
+      />
+    ),
+    [handleLikedCardPress, openingLikedId],
+  );
+
+  const listHeader = useMemo(
+    () => (
+      <View>
+        <View style={styles.profileRow}>
+          <ProfileAvatar uri={user?.avatarUri} size={64} />
+          <View style={styles.profileCopy}>
+            <Text style={styles.username}>{username}</Text>
+            <Text style={styles.bio} numberOfLines={2}>
+              {bio}
+            </Text>
+          </View>
+        </View>
+
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel="프로필 편집하기"
+          onPress={() => navigation.navigate('ProfileEdit')}
+          style={({ pressed }) => [styles.editProfileBtn, pressed && styles.pressed]}
+        >
+          <Text style={styles.editProfileText}>프로필 편집하기</Text>
+        </Pressable>
+
+        <View style={styles.profileDivider} />
+
+        <View style={styles.segmentRow}>
+          {SEGMENTS.map((item) => {
+            const active = segment === item.id;
+            return (
+              <Pressable
+                key={item.id}
+                accessibilityRole="button"
+                accessibilityState={{ selected: active }}
+                onPress={() => setSegment(item.id)}
+                style={[styles.segmentChip, active && styles.segmentChipActive]}
+              >
+                <Text style={[styles.segmentText, active && styles.segmentTextActive]}>
+                  {item.label}
+                </Text>
+              </Pressable>
+            );
+          })}
+        </View>
       </View>
-    </View>
+    ),
+    [bio, navigation, segment, user?.avatarUri, username],
   );
 
   const emptyText =
@@ -498,6 +521,40 @@ export function MyPageScreen({ navigation }: Props) {
     </SafeAreaView>
   );
 }
+
+type LikedDiaryCardProps = {
+  card: FeedDiaryCard;
+  busy: boolean;
+  onPressCard: (card: FeedDiaryCard) => void;
+};
+
+const LikedDiaryCard = memo(function LikedDiaryCard({
+  card,
+  busy,
+  onPressCard,
+}: LikedDiaryCardProps) {
+  const stub = useMemo(() => feedCardToDiaryStub(card), [card]);
+
+  return (
+    <Pressable
+      accessibilityRole="button"
+      disabled={busy}
+      onPress={() => onPressCard(card)}
+      style={({ pressed }) => [styles.card, pressed && styles.pressed]}
+    >
+      <View style={styles.thumb}>
+        <CoverThumb diary={stub} />
+        <View style={styles.likeBadge}>
+          <MyPageHeartIcon size={10} />
+          <Text style={styles.likeCount}>{card.likeCount}</Text>
+        </View>
+      </View>
+      <Text style={styles.cardCaption} numberOfLines={1}>
+        {card.title}
+      </Text>
+    </Pressable>
+  );
+});
 
 const styles = StyleSheet.create({
   safe: {

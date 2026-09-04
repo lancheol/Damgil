@@ -283,7 +283,8 @@ const styles = StyleSheet.create({
     position: 'absolute',
     alignItems: 'center',
     justifyContent: 'center',
-    zIndex: 4,
+    // 꾸미기 레이어(z=1…N)보다 항상 위
+    zIndex: 10000,
   },
   visual: {
     borderRadius: 8,

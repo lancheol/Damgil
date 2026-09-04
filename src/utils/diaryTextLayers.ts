@@ -1,5 +1,6 @@
 import { DecorFontId, DecorTextLayer, PhotoCropRect, PhotoDecoration } from '../types/diary';
 import { createStickerId, DEFAULT_DECOR_TEXT_COLOR } from './decorAssets';
+import { normalizeDecorLayerBundle } from './decorLayerOrder';
 
 export const FULL_CROP_RECT: PhotoCropRect = {
   x: 0,
@@ -42,6 +43,7 @@ export function createTextLayer(
     y: partial?.y ?? 0.45,
     scale: partial?.scale ?? 1,
     rotation: partial?.rotation ?? 0,
+    zIndex: partial?.zIndex,
   };
 }
 
@@ -71,6 +73,7 @@ export function resolveDecorationTexts(
       y: typeof item.y === 'number' ? item.y : 0.72,
       scale: typeof item.scale === 'number' ? item.scale : 1,
       rotation: typeof item.rotation === 'number' ? item.rotation : 0,
+      zIndex: typeof item.zIndex === 'number' ? item.zIndex : undefined,
     }));
   }
 
@@ -94,15 +97,19 @@ export function resolveDecorationTexts(
 }
 
 export function buildPhotoDecoration(input: {
-  stickers: PhotoDecoration['stickers'];
   texts: DecorTextLayer[];
   cropRect?: PhotoCropRect | null;
 }): PhotoDecoration {
-  const derived = deriveNoteFromTexts(input.texts);
+  const normalized = normalizeDecorLayerBundle({
+    photos: [],
+    stickers: [],
+    texts: input.texts,
+  });
+  const derived = deriveNoteFromTexts(normalized.texts);
   const cropRect = normalizeCropRect(input.cropRect);
   return {
-    stickers: input.stickers,
-    texts: input.texts,
+    stickers: [],
+    texts: normalized.texts,
     note: derived.note,
     fontId: derived.fontId,
     cropRect: isFullCrop(cropRect) ? null : cropRect,

@@ -8,9 +8,10 @@ import {
   ViewStyle,
 } from 'react-native';
 
-import { DraggableSticker, useCanvasPinchHandlers } from './DraggableSticker';
+import { useCanvasPinchHandlers } from './canvasPinchHandlers';
 import { DraggableText } from './DraggableText';
-import { DecorSticker, DecorTextLayer, DiaryMediaType, PhotoCropRect } from '../../types/diary';
+import { DecorTextLayer, DiaryMediaType, PhotoCropRect } from '../../types/diary';
+import { sortDecorLayersForRender } from '../../utils/decorLayerOrder';
 import { isFullCrop, normalizeCropRect } from '../../utils/diaryTextLayers';
 import { colors, typography } from '../../theme';
 
@@ -18,25 +19,18 @@ type RecordDecorCanvasProps = {
   uri: string;
   mediaType?: DiaryMediaType;
   cropRect?: PhotoCropRect | null;
-  stickers: DecorSticker[];
   texts: DecorTextLayer[];
-  selectedStickerId: string | null;
   selectedTextId: string | null;
   fullBleed?: boolean;
   style?: ViewStyle;
-  onSelectSticker?: (id: string | null) => void;
   onSelectText?: (id: string) => void;
   onEditText?: (id: string) => void;
   onBackgroundPress?: () => void;
-  onMoveSticker?: (id: string, x: number, y: number) => void;
-  onScaleSticker?: (id: string, scale: number) => void;
-  onRotateSticker?: (id: string, rotation: number) => void;
   onMoveText?: (id: string, x: number, y: number) => void;
   onScaleText?: (id: string, scale: number) => void;
   onRotateText?: (id: string, rotation: number) => void;
   onLayerDragChange?: (dragging: boolean) => void;
   onLayerDragPointer?: (pageX: number, pageY: number) => void;
-  onStickerDragEnd?: (id: string, pageX?: number, pageY?: number) => void;
   onTextDragEnd?: (id: string, pageX?: number, pageY?: number) => void;
 };
 
@@ -44,69 +38,49 @@ export function RecordDecorCanvas({
   uri,
   mediaType = 'photo',
   cropRect,
-  stickers,
   texts,
-  selectedStickerId,
   selectedTextId,
   fullBleed = false,
   style,
-  onSelectSticker,
   onSelectText,
   onEditText,
   onBackgroundPress,
-  onMoveSticker,
-  onScaleSticker,
-  onRotateSticker,
   onMoveText,
   onScaleText,
   onRotateText,
   onLayerDragChange,
   onLayerDragPointer,
-  onStickerDragEnd,
   onTextDragEnd,
 }: RecordDecorCanvasProps) {
   const layoutRef = useRef({ width: 1, height: 1 });
   const isVideo = mediaType === 'video';
-  const stickersRef = useRef(stickers);
   const textsRef = useRef(texts);
-  stickersRef.current = stickers;
   textsRef.current = texts;
 
   const crop = normalizeCropRect(cropRect);
   const cropped = !isFullCrop(crop);
 
-  const selectedLayerId = selectedTextId ?? selectedStickerId;
+  const sortedLayers = sortDecorLayersForRender({
+    photos: [],
+    texts,
+    stickers: [],
+  });
 
   const pinchHandlers = useCanvasPinchHandlers({
     enabled: true,
-    selectedStickerId: selectedLayerId,
+    selectedLayerId: selectedTextId,
     getSelectedTransform: () => {
-      if (selectedTextId) {
-        const text = textsRef.current.find((item) => item.id === selectedTextId);
-        return {
-          scale: text?.scale ?? 1,
-          rotation: text?.rotation ?? 0,
-        };
-      }
-      const sticker = stickersRef.current.find((item) => item.id === selectedStickerId);
+      const text = textsRef.current.find((item) => item.id === selectedTextId);
       return {
-        scale: sticker?.scale ?? 1,
-        rotation: sticker?.rotation ?? 0,
+        scale: text?.scale ?? 1,
+        rotation: text?.rotation ?? 0,
       };
     },
     onScale: (id, scale) => {
-      if (textsRef.current.some((item) => item.id === id)) {
-        onScaleText?.(id, scale);
-        return;
-      }
-      onScaleSticker?.(id, scale);
+      onScaleText?.(id, scale);
     },
     onRotate: (id, rotation) => {
-      if (textsRef.current.some((item) => item.id === id)) {
-        onRotateText?.(id, rotation);
-        return;
-      }
-      onRotateSticker?.(id, rotation);
+      onRotateText?.(id, rotation);
     },
     onDragChange: onLayerDragChange,
   });
@@ -144,38 +118,28 @@ export function RecordDecorCanvas({
         </View>
       ) : null}
 
-      {texts.map((layer) => (
-        <DraggableText
-          key={layer.id}
-          layer={layer}
-          selected={selectedTextId === layer.id}
-          layoutRef={layoutRef}
-          onSelect={() => onSelectText?.(layer.id)}
-          onEditRequest={() => onEditText?.(layer.id)}
-          onMove={(x, y) => onMoveText?.(layer.id, x, y)}
-          onScale={(scale) => onScaleText?.(layer.id, scale)}
-          onRotate={(rotation) => onRotateText?.(layer.id, rotation)}
-          onDragChange={onLayerDragChange}
-          onDragPointer={onLayerDragPointer}
-          onDragEnd={(pageX, pageY) => onTextDragEnd?.(layer.id, pageX, pageY)}
-        />
-      ))}
-
-      {stickers.map((sticker) => (
-        <DraggableSticker
-          key={sticker.id}
-          sticker={sticker}
-          selected={selectedStickerId === sticker.id}
-          layoutRef={layoutRef}
-          onSelect={() => onSelectSticker?.(sticker.id)}
-          onMove={(x, y) => onMoveSticker?.(sticker.id, x, y)}
-          onScale={(scale) => onScaleSticker?.(sticker.id, scale)}
-          onRotate={(rotation) => onRotateSticker?.(sticker.id, rotation)}
-          onDragChange={onLayerDragChange}
-          onDragPointer={onLayerDragPointer}
-          onDragEnd={(pageX, pageY) => onStickerDragEnd?.(sticker.id, pageX, pageY)}
-        />
-      ))}
+      {sortedLayers.map((item) => {
+        if (item.kind !== 'text') {
+          return null;
+        }
+        const layer = item.layer;
+        return (
+          <DraggableText
+            key={`text:${layer.id}`}
+            layer={layer}
+            selected={selectedTextId === layer.id}
+            layoutRef={layoutRef}
+            onSelect={() => onSelectText?.(layer.id)}
+            onEditRequest={() => onEditText?.(layer.id)}
+            onMove={(x, y) => onMoveText?.(layer.id, x, y)}
+            onScale={(scale) => onScaleText?.(layer.id, scale)}
+            onRotate={(rotation) => onRotateText?.(layer.id, rotation)}
+            onDragChange={onLayerDragChange}
+            onDragPointer={onLayerDragPointer}
+            onDragEnd={(pageX, pageY) => onTextDragEnd?.(layer.id, pageX, pageY)}
+          />
+        );
+      })}
     </View>
   );
 }
@@ -196,11 +160,11 @@ const styles = StyleSheet.create({
     borderRadius: 0,
   },
   mediaClip: {
-    ...StyleSheet.absoluteFillObject,
+    ...StyleSheet.absoluteFill,
     overflow: 'hidden',
   },
   media: {
-    ...StyleSheet.absoluteFillObject,
+    ...StyleSheet.absoluteFill,
   },
   lockBadge: {
     position: 'absolute',

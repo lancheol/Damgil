@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useMemo, useRef, useState } from 'react';
 import {
   Image,
   LayoutChangeEvent,
@@ -13,10 +13,6 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { PhotoCropRect } from '../../types/diary';
 import { FULL_CROP_RECT, normalizeCropRect } from '../../utils/diaryTextLayers';
-import {
-  PHOTO_LAYER_BASE_H,
-  PHOTO_LAYER_BASE_W,
-} from './DraggablePhoto';
 import { colors, radii, spacing, typography } from '../../theme';
 
 type PhotoCropModalProps = {
@@ -28,31 +24,14 @@ type PhotoCropModalProps = {
 };
 
 type Box = { x: number; y: number; width: number; height: number };
-type Corner = 'tl' | 'tr' | 'bl' | 'br';
-
-const HANDLE_HIT = 44;
-const HANDLE_DOT = 18;
 
 function clampBox(box: Box, maxW: number, maxH: number): Box {
-  const minSize = Math.min(maxW, maxH) * 0.18;
+  const minSize = Math.min(maxW, maxH) * 0.2;
   const width = Math.min(maxW, Math.max(minSize, box.width));
   const height = Math.min(maxH, Math.max(minSize, box.height));
   const x = Math.min(maxW - width, Math.max(0, box.x));
   const y = Math.min(maxH - height, Math.max(0, box.y));
   return { x, y, width, height };
-}
-
-function boxFromCrop(crop: PhotoCropRect, width: number, height: number): Box {
-  return clampBox(
-    {
-      x: crop.x * width,
-      y: crop.y * height,
-      width: crop.width * width,
-      height: crop.height * height,
-    },
-    width,
-    height,
-  );
 }
 
 export function PhotoCropModal({
@@ -70,29 +49,6 @@ export function PhotoCropModal({
   const frameRef = useRef(frame);
   frameRef.current = frame;
   const dragStart = useRef<Box | null>(null);
-  const initialCropRef = useRef(initialCrop);
-  initialCropRef.current = initialCrop;
-
-  const applyBox = (next: Box) => {
-    const clamped = clampBox(next, frameRef.current.width, frameRef.current.height);
-    boxRef.current = clamped;
-    setBox(clamped);
-  };
-
-  const syncBoxToCrop = (width: number, height: number) => {
-    const crop = normalizeCropRect(initialCropRef.current);
-    applyBox(boxFromCrop(crop, width, height));
-  };
-
-  useEffect(() => {
-    if (!visible) {
-      return;
-    }
-    const fr = frameRef.current;
-    if (fr.width > 1 && fr.height > 1) {
-      syncBoxToCrop(fr.width, fr.height);
-    }
-  }, [visible, uri]);
 
   const onFrameLayout = (event: LayoutChangeEvent) => {
     const { width, height } = event.nativeEvent.layout;
@@ -101,7 +57,19 @@ export function PhotoCropModal({
     }
     setFrame({ width, height });
     frameRef.current = { width, height };
-    syncBoxToCrop(width, height);
+    const crop = normalizeCropRect(initialCrop);
+    const next = clampBox(
+      {
+        x: crop.x * width,
+        y: crop.y * height,
+        width: crop.width * width,
+        height: crop.height * height,
+      },
+      width,
+      height,
+    );
+    setBox(next);
+    boxRef.current = next;
   };
 
   const moveResponder = useMemo(
@@ -109,43 +77,45 @@ export function PhotoCropModal({
       PanResponder.create({
         onStartShouldSetPanResponder: () => true,
         onMoveShouldSetPanResponder: () => true,
-        onPanResponderTerminationRequest: () => false,
-        onShouldBlockNativeResponder: () => true,
         onPanResponderGrant: () => {
           dragStart.current = { ...boxRef.current };
         },
         onPanResponderMove: (_evt, gesture) => {
           const start = dragStart.current;
+          const fr = frameRef.current;
           if (!start) {
             return;
           }
-          applyBox({
-            ...start,
-            x: start.x + gesture.dx,
-            y: start.y + gesture.dy,
-          });
+          const next = clampBox(
+            {
+              ...start,
+              x: start.x + gesture.dx,
+              y: start.y + gesture.dy,
+            },
+            fr.width,
+            fr.height,
+          );
+          setBox(next);
+          boxRef.current = next;
         },
       }),
     [],
   );
 
-  const makeCornerResponder = (corner: Corner) =>
+  const makeCornerResponder = (corner: 'tl' | 'tr' | 'bl' | 'br') =>
     PanResponder.create({
       onStartShouldSetPanResponder: () => true,
-      onStartShouldSetPanResponderCapture: () => true,
       onMoveShouldSetPanResponder: () => true,
-      onMoveShouldSetPanResponderCapture: () => true,
-      onPanResponderTerminationRequest: () => false,
-      onShouldBlockNativeResponder: () => true,
       onPanResponderGrant: () => {
         dragStart.current = { ...boxRef.current };
       },
       onPanResponderMove: (_evt, gesture) => {
         const start = dragStart.current;
+        const fr = frameRef.current;
         if (!start) {
           return;
         }
-        let next: Box = { ...start };
+        let next = { ...start };
         if (corner === 'tl') {
           next = {
             x: start.x + gesture.dx,
@@ -175,7 +145,9 @@ export function PhotoCropModal({
             height: start.height + gesture.dy,
           };
         }
-        applyBox(next);
+        next = clampBox(next, fr.width, fr.height);
+        setBox(next);
+        boxRef.current = next;
       },
     });
 
@@ -203,21 +175,9 @@ export function PhotoCropModal({
 
   const handleReset = () => {
     const fr = frameRef.current;
-    applyBox({ x: 0, y: 0, width: fr.width, height: fr.height });
-  };
-
-  const handleStyle = (corner: Corner) => {
-    const half = HANDLE_HIT / 2;
-    if (corner === 'tl') {
-      return { left: box.x - half, top: box.y - half };
-    }
-    if (corner === 'tr') {
-      return { left: box.x + box.width - half, top: box.y - half };
-    }
-    if (corner === 'bl') {
-      return { left: box.x - half, top: box.y + box.height - half };
-    }
-    return { left: box.x + box.width - half, top: box.y + box.height - half };
+    const next = { x: 0, y: 0, width: fr.width, height: fr.height };
+    setBox(next);
+    boxRef.current = next;
   };
 
   return (
@@ -233,75 +193,61 @@ export function PhotoCropModal({
           </Pressable>
         </View>
 
-        <Text style={styles.hint}>흰 모서리를 드래그해 자르고, 안쪽을 밀어 위치를 옮겨 보세요.</Text>
+        <Text style={styles.hint}>영역을 드래그해 옮기고, 모서리로 크기를 조절하세요.</Text>
 
-        <View style={styles.stage}>
-          <View style={styles.frame} onLayout={onFrameLayout}>
-            <Image source={{ uri }} style={styles.image} resizeMode="cover" />
-            <View pointerEvents="none" style={[styles.maskTop, { height: Math.max(0, box.y) }]} />
-            <View
-              pointerEvents="none"
-              style={[
-                styles.maskBottom,
-                {
-                  top: box.y + box.height,
-                  height: Math.max(0, frame.height - box.y - box.height),
-                },
-              ]}
-            />
-            <View
-              pointerEvents="none"
-              style={[
-                styles.maskSide,
-                {
-                  top: box.y,
-                  width: Math.max(0, box.x),
-                  height: box.height,
-                },
-              ]}
-            />
-            <View
-              pointerEvents="none"
-              style={[
-                styles.maskSide,
-                {
-                  top: box.y,
-                  left: box.x + box.width,
-                  width: Math.max(0, frame.width - box.x - box.width),
-                  height: box.height,
-                },
-              ]}
-            />
+        <View style={styles.frame} onLayout={onFrameLayout}>
+          <Image source={{ uri }} style={styles.image} resizeMode="cover" />
+          <View pointerEvents="none" style={[styles.maskTop, { height: Math.max(0, box.y) }]} />
+          <View
+            pointerEvents="none"
+            style={[
+              styles.maskBottom,
+              {
+                top: box.y + box.height,
+                height: Math.max(0, frame.height - box.y - box.height),
+              },
+            ]}
+          />
+          <View
+            pointerEvents="none"
+            style={[
+              styles.maskSide,
+              {
+                top: box.y,
+                width: Math.max(0, box.x),
+                height: box.height,
+              },
+            ]}
+          />
+          <View
+            pointerEvents="none"
+            style={[
+              styles.maskSide,
+              {
+                top: box.y,
+                left: box.x + box.width,
+                width: Math.max(0, frame.width - box.x - box.width),
+                height: box.height,
+              },
+            ]}
+          />
 
-            <View
-              {...moveResponder.panHandlers}
-              style={[
-                styles.cropBox,
-                {
-                  left: box.x,
-                  top: box.y,
-                  width: box.width,
-                  height: box.height,
-                },
-              ]}
-            />
-
-            {(
-              [
-                ['tl', tl],
-                ['tr', tr],
-                ['bl', bl],
-                ['br', br],
-              ] as const
-            ).map(([corner, responder]) => (
-              <View
-                key={corner}
-                {...responder.panHandlers}
-                style={[styles.handleHit, handleStyle(corner)]}
-              >
-                <View style={styles.handleDot} />
-              </View>
-            ))}
+          <View
+            {...moveResponder.panHandlers}
+            style={[
+              styles.cropBox,
+              {
+                left: box.x,
+                top: box.y,
+                width: box.width,
+                height: box.height,
+              },
+            ]}
+          >
+            <View {...tl.panHandlers} style={[styles.handle, styles.handleTL]} />
+            <View {...tr.panHandlers} style={[styles.handle, styles.handleTR]} />
+            <View {...bl.panHandlers} style={[styles.handle, styles.handleBL]} />
+            <View {...br.panHandlers} style={[styles.handle, styles.handleBR]} />
           </View>
         </View>
 
@@ -350,22 +296,14 @@ const styles = StyleSheet.create({
     paddingHorizontal: spacing.lg,
   },
   frame: {
-    width: '100%',
-    maxWidth: 360,
-    aspectRatio: PHOTO_LAYER_BASE_W / PHOTO_LAYER_BASE_H,
-    borderRadius: radii.md,
-    backgroundColor: '#111111',
-    overflow: 'visible',
-  },
-  stage: {
     flex: 1,
     marginHorizontal: spacing.lg,
-    alignItems: 'center',
-    justifyContent: 'center',
+    borderRadius: radii.md,
+    overflow: 'hidden',
+    backgroundColor: '#111111',
   },
   image: {
-    ...StyleSheet.absoluteFillObject,
-    borderRadius: radii.md,
+    ...StyleSheet.absoluteFill,
   },
   maskTop: {
     position: 'absolute',
@@ -390,22 +328,19 @@ const styles = StyleSheet.create({
     borderWidth: 2,
     borderColor: colors.white,
   },
-  handleHit: {
+  handle: {
     position: 'absolute',
-    width: HANDLE_HIT,
-    height: HANDLE_HIT,
-    alignItems: 'center',
-    justifyContent: 'center',
-    zIndex: 20,
-  },
-  handleDot: {
-    width: HANDLE_DOT,
-    height: HANDLE_DOT,
-    borderRadius: HANDLE_DOT / 2,
+    width: 22,
+    height: 22,
+    borderRadius: 11,
     backgroundColor: colors.white,
     borderWidth: 2,
     borderColor: '#111111',
   },
+  handleTL: { left: -11, top: -11 },
+  handleTR: { right: -11, top: -11 },
+  handleBL: { left: -11, bottom: -11 },
+  handleBR: { right: -11, bottom: -11 },
   resetBtn: {
     alignSelf: 'center',
     marginVertical: spacing.lg,

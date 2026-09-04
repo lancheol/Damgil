@@ -6,13 +6,18 @@ import type {
   PlacePageDecoration,
 } from '../types/diary';
 import { isDecorFontId } from './decorAssets';
+import {
+  ensureDecorLayerZIndexes,
+  normalizeDecorLayerBundle,
+  sortDecorLayersForRender,
+} from './decorLayerOrder';
 import { findPhotoByMediaRef } from './diaryPhotos';
 import { buildDiaryTimeline } from './diaryTimeline';
 
 const OBJECT_PREFIX = 'place:';
 const DEFAULT_TEXT_COLOR = '#111111';
 
-function objectId(placeId: string, type: 'photo' | 'sticker' | 'text', id: string): string {
+function objectId(placeId: string, type: 'photo' | 'text', id: string): string {
   return `${OBJECT_PREFIX}${encodeURIComponent(placeId)}:${type}:${encodeURIComponent(id)}`.slice(
     0,
     100,
@@ -21,13 +26,13 @@ function objectId(placeId: string, type: 'photo' | 'sticker' | 'text', id: strin
 
 function parseObjectId(
   value: string,
-): { placeId: string; type: 'photo' | 'sticker' | 'text'; id: string } | null {
-  const match = /^place:([^:]+):(photo|sticker|text):(.+)$/.exec(value);
+): { placeId: string; type: 'photo' | 'text'; id: string } | null {
+  const match = /^place:([^:]+):(photo|text):(.+)$/.exec(value);
   if (!match) return null;
   try {
     return {
       placeId: decodeURIComponent(match[1]),
-      type: match[2] as 'photo' | 'sticker' | 'text',
+      type: match[2] as 'photo' | 'text',
       id: decodeURIComponent(match[3]),
     };
   } catch {
@@ -65,37 +70,34 @@ export function buildEditorStateForDay(diary: Diary, dayNumber: number): EditorS
     const decoration = place.pageDecoration;
     if (!decoration) continue;
 
-    decoration.photos.forEach((layer, index) => {
-      const mediaId = diary.photos.find((photo) => photo.id === layer.photoId)?.mediaId;
-      if (!mediaId) return;
-      objects.push({
-        objectId: objectId(place.id, 'photo', layer.id),
-        objectType: 'IMAGE',
-        x: layer.x,
-        y: layer.y,
-        width: 0.72 * layer.scale,
-        height: 0.72 * layer.scale,
-        rotation: layer.rotation,
-        layer: index,
-        mediaId,
-      });
+    const normalized = normalizeDecorLayerBundle({
+      photos: decoration.photos,
+      stickers: [],
+      texts: decoration.texts,
     });
 
-    decoration.stickers.forEach((sticker, index) => {
-      objects.push({
-        objectId: objectId(place.id, 'sticker', sticker.id),
-        objectType: 'STICKER',
-        x: sticker.x,
-        y: sticker.y,
-        width: 0.18 * sticker.scale,
-        height: 0.18 * sticker.scale,
-        rotation: sticker.rotation,
-        layer: decoration.photos.length + index,
-        stickerId: sticker.emoji,
-      });
-    });
+    for (const item of sortDecorLayersForRender(normalized)) {
+      if (item.kind === 'photo') {
+        const layer = item.layer;
+        const mediaId = diary.photos.find((photo) => photo.id === layer.photoId)?.mediaId;
+        if (!mediaId) continue;
+        objects.push({
+          objectId: objectId(place.id, 'photo', layer.id),
+          objectType: 'IMAGE',
+          x: layer.x,
+          y: layer.y,
+          width: 0.72 * layer.scale,
+          height: 0.72 * layer.scale,
+          rotation: layer.rotation,
+          layer: layer.zIndex ?? 1,
+          mediaId,
+        });
+        continue;
+      }
 
-    decoration.texts.forEach((text, index) => {
+      if (item.kind === 'sticker') continue;
+
+      const text = item.layer;
       objects.push({
         objectId: objectId(place.id, 'text', text.id),
         objectType: 'TEXT',
@@ -104,13 +106,13 @@ export function buildEditorStateForDay(diary: Diary, dayNumber: number): EditorS
         width: 0.4 * text.scale,
         height: 0.1 * text.scale,
         rotation: text.rotation,
-        layer: decoration.photos.length + decoration.stickers.length + index,
+        layer: text.zIndex ?? 1,
         text: text.content.slice(0, 500),
         fontFamily: text.fontId,
         fontSize: 24 * text.scale,
         align: 'center',
       });
-    });
+    }
   }
 
   return { objects: objects.slice(0, 200) };
@@ -140,6 +142,10 @@ export function applyEditorDaysToDiary(
 
     for (const { object, parsed } of objects) {
       if (!parsed) continue;
+      const zIndex =
+        typeof object.layer === 'number' && Number.isFinite(object.layer)
+          ? Math.trunc(object.layer)
+          : undefined;
       if (parsed.type === 'photo' && object.objectType === 'IMAGE' && object.mediaId) {
         const photo = findPhotoByMediaRef(diary.photos, object.mediaId);
         if (!photo) continue;
@@ -151,15 +157,7 @@ export function applyEditorDaysToDiary(
           scale: object.width / 0.72,
           rotation: object.rotation,
           cropRect: photo.decoration?.cropRect ?? null,
-        });
-      } else if (parsed.type === 'sticker' && object.objectType === 'STICKER') {
-        decoration.stickers.push({
-          id: parsed.id,
-          emoji: object.stickerId ?? '⭐',
-          x: object.x,
-          y: object.y,
-          scale: object.width / 0.18,
-          rotation: object.rotation,
+          zIndex,
         });
       } else if (parsed.type === 'text' && object.objectType === 'TEXT') {
         decoration.texts.push({
@@ -171,11 +169,21 @@ export function applyEditorDaysToDiary(
           y: object.y,
           scale: object.fontSize ? object.fontSize / 24 : object.width / 0.4,
           rotation: object.rotation,
+          zIndex,
         });
       }
     }
 
-    return { ...place, pageDecoration: decoration };
+    const ensured = ensureDecorLayerZIndexes(decoration);
+    return {
+      ...place,
+      pageDecoration: {
+        ...decoration,
+        photos: ensured.photos,
+        stickers: [],
+        texts: ensured.texts,
+      },
+    };
   });
 
   return { ...diary, placeSelections: nextSelections };

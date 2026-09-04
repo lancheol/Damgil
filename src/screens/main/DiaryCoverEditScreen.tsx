@@ -30,14 +30,11 @@ import {
   CoverFontId,
   DecorFontId,
   DecorPhotoLayer,
-  DecorSticker,
   DecorTextLayer,
   DiaryCover,
 } from '../../types/diary';
 import {
-  createStickerId,
   DECOR_FONTS,
-  DECOR_STICKER_EMOJIS,
   DEFAULT_DECOR_TEXT_COLOR,
 } from '../../utils/decorAssets';
 import {
@@ -49,6 +46,11 @@ import { createDefaultPhotoLayer } from '../../utils/diaryPageDecoration';
 import { indexPhotosById } from '../../utils/diaryPhotos';
 import { createTextLayer } from '../../utils/diaryTextLayers';
 import {
+  nextDecorLayerZ,
+  withLayerBroughtToFront,
+} from '../../utils/decorLayerOrder';
+import {
+  buildCoverForSave,
   DEFAULT_COVER_COLOR,
   DEFAULT_COVER_TITLE_X,
   DEFAULT_COVER_TITLE_Y,
@@ -65,7 +67,7 @@ import {
 import { colors, radii, spacing, typography } from '../../theme';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'DiaryCoverEdit'>;
-type ToolSheet = 'none' | 'sticker' | 'text' | 'cover' | 'title';
+type ToolSheet = 'none' | 'text' | 'cover' | 'title';
 
 type HitRect = { x: number; y: number; width: number; height: number };
 
@@ -110,14 +112,10 @@ export function DiaryCoverEditScreen({ navigation, route }: Props) {
   const [photos, setPhotos] = useState<DecorPhotoLayer[]>(
     Array.isArray(initial.photos) ? initial.photos : [],
   );
-  const [stickers, setStickers] = useState<DecorSticker[]>(
-    Array.isArray(initial.stickers) ? initial.stickers : [],
-  );
   const [texts, setTexts] = useState<DecorTextLayer[]>(
     Array.isArray(initial.texts) ? initial.texts : [],
   );
   const [selectedPhotoId, setSelectedPhotoId] = useState<string | null>(null);
-  const [selectedStickerId, setSelectedStickerId] = useState<string | null>(null);
   const [selectedTextId, setSelectedTextId] = useState<string | null>(null);
   const [selectedTitle, setSelectedTitle] = useState(false);
   const [draggingLayer, setDraggingLayer] = useState(false);
@@ -164,10 +162,8 @@ export function DiaryCoverEditScreen({ navigation, route }: Props) {
       setTitleColor(source.titleColor?.trim() || undefined);
       setBackgroundColor(getCoverBackgroundColor(source) || DEFAULT_COVER_COLOR);
       setPhotos(Array.isArray(source.photos) ? source.photos : []);
-      setStickers(Array.isArray(source.stickers) ? source.stickers : []);
       setTexts(Array.isArray(source.texts) ? source.texts : []);
       setSelectedPhotoId(null);
-      setSelectedStickerId(null);
       setSelectedTextId(null);
       setSelectedTitle(false);
       dirtyRef.current = false;
@@ -223,7 +219,7 @@ export function DiaryCoverEditScreen({ navigation, route }: Props) {
   }, [diaries]);
 
   const buildCover = useCallback((): DiaryCover => {
-    return {
+    return buildCoverForSave({
       coverPhotoId: photos[0]?.photoId ?? null,
       title: title.trim() || diary?.name || '나의 여행',
       fontId,
@@ -232,13 +228,13 @@ export function DiaryCoverEditScreen({ navigation, route }: Props) {
       titleScale,
       titleRotation,
       titleColor: titleColor ?? null,
-      stickers,
+      stickers: [],
       photos,
       texts,
       backgroundColor,
       updatedAt: new Date().toISOString(),
-    };
-  }, [title, fontId, titleX, titleY, titleScale, titleRotation, titleColor, stickers, photos, texts, backgroundColor, diary?.name]);
+    });
+  }, [title, fontId, titleX, titleY, titleScale, titleRotation, titleColor, photos, texts, backgroundColor, diary?.name]);
 
   // 여행 종료 직후에는 돌아갈 곳이 카메라 플로우라 마이페이지로 보낸다
   const leaveToMyPage = () => {
@@ -341,9 +337,14 @@ export function DiaryCoverEditScreen({ navigation, route }: Props) {
 
   const clearSelection = () => {
     setSelectedPhotoId(null);
-    setSelectedStickerId(null);
     setSelectedTextId(null);
     setSelectedTitle(false);
+  };
+
+  const bringLayerToFront = (kind: 'photo' | 'text', id: string) => {
+    const next = withLayerBroughtToFront({ photos, texts, stickers: [] }, kind, id);
+    setPhotos(next.photos);
+    setTexts(next.texts);
   };
 
   const selectedPhotoLayer = photos.find((item) => item.id === selectedPhotoId) ?? null;
@@ -354,10 +355,10 @@ export function DiaryCoverEditScreen({ navigation, route }: Props) {
       x: Math.min(0.7, 0.5 + offset),
       y: Math.min(0.7, 0.4 + offset),
       scale: 0.68,
+      zIndex: nextDecorLayerZ({ photos, texts, stickers: [] }),
     });
     setPhotos((prev) => [...prev, layer]);
     setSelectedPhotoId(layer.id);
-    setSelectedStickerId(null);
     setSelectedTextId(null);
     setSelectedTitle(false);
     markDirty();
@@ -416,7 +417,6 @@ export function DiaryCoverEditScreen({ navigation, route }: Props) {
 
   const openEditTitle = () => {
     setSelectedPhotoId(null);
-    setSelectedStickerId(null);
     setSelectedTextId(null);
     setSelectedTitle(true);
     setEditingTextId(null);
@@ -450,8 +450,8 @@ export function DiaryCoverEditScreen({ navigation, route }: Props) {
     if (!target) {
       return;
     }
+    bringLayerToFront('text', id);
     setSelectedPhotoId(null);
-    setSelectedStickerId(null);
     setSelectedTextId(id);
     setSelectedTitle(false);
     setEditingTextId(id);
@@ -474,10 +474,17 @@ export function DiaryCoverEditScreen({ navigation, route }: Props) {
       return;
     }
     if (editingTextId) {
+      const top = nextDecorLayerZ({ photos, texts, stickers: [] });
       setTexts((prev) =>
         prev.map((item) =>
           item.id === editingTextId
-            ? { ...item, content, fontId: draftFontId, color: draftColor }
+            ? {
+                ...item,
+                content,
+                fontId: draftFontId,
+                color: draftColor,
+                zIndex: top,
+              }
             : item,
         ),
       );
@@ -487,6 +494,7 @@ export function DiaryCoverEditScreen({ navigation, route }: Props) {
         x: 0.5,
         y: 0.7,
         color: draftColor,
+        zIndex: nextDecorLayerZ({ photos, texts, stickers: [] }),
       });
       setTexts((prev) => [...prev, layer]);
       setSelectedTextId(layer.id);
@@ -496,26 +504,8 @@ export function DiaryCoverEditScreen({ navigation, route }: Props) {
     markDirty();
   };
 
-  const addSticker = (emoji: string) => {
-    const sticker: DecorSticker = {
-      id: createStickerId('cover'),
-      emoji,
-      x: 0.22,
-      y: 0.28,
-      scale: 1,
-      rotation: 0,
-    };
-    setStickers((prev) => [...prev, sticker]);
-    setSelectedStickerId(sticker.id);
-    setSelectedPhotoId(null);
-    setSelectedTextId(null);
-    setSelectedTitle(false);
-    setSheet('none');
-    markDirty();
-  };
-
   const finishDelete = (
-    type: 'photo' | 'sticker' | 'text',
+    type: 'photo' | 'text',
     id: string,
     shouldDelete: boolean,
   ) => {
@@ -523,9 +513,6 @@ export function DiaryCoverEditScreen({ navigation, route }: Props) {
       if (type === 'photo') {
         setPhotos((prev) => prev.filter((item) => item.id !== id));
         setSelectedPhotoId(null);
-      } else if (type === 'sticker') {
-        setStickers((prev) => prev.filter((item) => item.id !== id));
-        setSelectedStickerId(null);
       } else {
         setTexts((prev) => prev.filter((item) => item.id !== id));
         setSelectedTextId(null);
@@ -537,7 +524,7 @@ export function DiaryCoverEditScreen({ navigation, route }: Props) {
   };
 
   const handleDragEnd = (
-    type: 'photo' | 'sticker' | 'text',
+    type: 'photo' | 'text',
     id: string,
     pageX?: number,
     pageY?: number,
@@ -617,17 +604,14 @@ export function DiaryCoverEditScreen({ navigation, route }: Props) {
                 titleRotation={titleRotation}
                 photos={photos}
                 photoById={photoById}
-                stickers={stickers}
                 texts={texts}
                 selectedPhotoId={selectedPhotoId}
-                selectedStickerId={selectedStickerId}
                 selectedTextId={selectedTextId}
                 selectedTitle={selectedTitle}
                 onBackgroundPress={clearSelection}
                 onSelectTitle={() => {
                   setSelectedTitle(true);
                   setSelectedPhotoId(null);
-                  setSelectedStickerId(null);
                   setSelectedTextId(null);
                 }}
                 onEditTitle={openEditTitle}
@@ -645,21 +629,15 @@ export function DiaryCoverEditScreen({ navigation, route }: Props) {
                   markDirty();
                 }}
                 onSelectPhoto={(id) => {
+                  bringLayerToFront('photo', id);
                   setSelectedPhotoId(id);
-                  setSelectedStickerId(null);
-                  setSelectedTextId(null);
-                  setSelectedTitle(false);
-                }}
-                onSelectSticker={(id) => {
-                  setSelectedStickerId(id);
-                  setSelectedPhotoId(null);
                   setSelectedTextId(null);
                   setSelectedTitle(false);
                 }}
                 onSelectText={(id) => {
+                  bringLayerToFront('text', id);
                   setSelectedTextId(id);
                   setSelectedPhotoId(null);
-                  setSelectedStickerId(null);
                   setSelectedTitle(false);
                 }}
                 onEditText={openEditText}
@@ -675,24 +653,6 @@ export function DiaryCoverEditScreen({ navigation, route }: Props) {
                 }}
                 onRotatePhoto={(id, rotation) => {
                   setPhotos((prev) =>
-                    prev.map((item) => (item.id === id ? { ...item, rotation } : item)),
-                  );
-                  markDirty();
-                }}
-                onMoveSticker={(id, x, y) => {
-                  setStickers((prev) =>
-                    prev.map((item) => (item.id === id ? { ...item, x, y } : item)),
-                  );
-                  markDirty();
-                }}
-                onScaleSticker={(id, scale) => {
-                  setStickers((prev) =>
-                    prev.map((item) => (item.id === id ? { ...item, scale } : item)),
-                  );
-                  markDirty();
-                }}
-                onRotateSticker={(id, rotation) => {
-                  setStickers((prev) =>
                     prev.map((item) => (item.id === id ? { ...item, rotation } : item)),
                   );
                   markDirty();
@@ -725,7 +685,6 @@ export function DiaryCoverEditScreen({ navigation, route }: Props) {
                   setTrashHotState(shouldDeleteAtPoint(pageX, pageY));
                 }}
                 onPhotoDragEnd={(id, pageX, pageY) => handleDragEnd('photo', id, pageX, pageY)}
-                onStickerDragEnd={(id, pageX, pageY) => handleDragEnd('sticker', id, pageX, pageY)}
                 onTextDragEnd={(id, pageX, pageY) => handleDragEnd('text', id, pageX, pageY)}
                 onTitleDragChange={(dragging) => {
                   setDraggingTitle(dragging);
@@ -787,13 +746,6 @@ export function DiaryCoverEditScreen({ navigation, route }: Props) {
             <Text style={styles.toolLabel}>텍스트</Text>
           </Pressable>
           <Pressable
-            onPress={() => setSheet('sticker')}
-            style={({ pressed }) => [styles.toolItem, pressed && styles.pressed]}
-          >
-            <Ionicons name="happy-outline" size={24} color={colors.ink} />
-            <Text style={styles.toolLabel}>스티커</Text>
-          </Pressable>
-          <Pressable
             onPress={() => setSheet('cover')}
             style={({ pressed }) => [styles.toolItem, pressed && styles.pressed]}
           >
@@ -820,30 +772,6 @@ export function DiaryCoverEditScreen({ navigation, route }: Props) {
           }}
         />
       ) : null}
-
-      <Modal
-        visible={sheet === 'sticker'}
-        transparent
-        animationType="slide"
-        onRequestClose={() => setSheet('none')}
-      >
-        <Pressable style={styles.sheetBackdropClear} onPress={() => setSheet('none')} />
-        <View style={[styles.sheet, { paddingBottom: Math.max(insets.bottom, 16) }]}>
-          <View style={styles.sheetHandle} />
-          <Text style={styles.sheetTitle}>스티커</Text>
-          <ScrollView contentContainerStyle={styles.stickerGrid}>
-            {DECOR_STICKER_EMOJIS.map((emoji) => (
-              <Pressable
-                key={emoji}
-                onPress={() => addSticker(emoji)}
-                style={({ pressed }) => [styles.stickerCell, pressed && styles.pressed]}
-              >
-                <Text style={styles.stickerCellText}>{emoji}</Text>
-              </Pressable>
-            ))}
-          </ScrollView>
-        </View>
-      </Modal>
 
       <Modal
         visible={sheet === 'cover'}
@@ -1092,21 +1020,6 @@ const styles = StyleSheet.create({
     marginBottom: spacing.sm,
   },
   sheetTitle: { ...typography.label, color: colors.ink },
-  stickerGrid: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: spacing.sm,
-    paddingBottom: spacing.lg,
-  },
-  stickerCell: {
-    width: 52,
-    height: 52,
-    borderRadius: radii.sm,
-    backgroundColor: colors.background,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  stickerCellText: { fontSize: 28 },
   coverTitleInput: {
     minHeight: 44,
     borderRadius: radii.md,
@@ -1146,11 +1059,11 @@ const styles = StyleSheet.create({
     paddingBottom: spacing.xs,
   },
   textModalRoot: { flex: 1 },
-  textModalDim: { ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(0,0,0,0.72)' },
+  textModalDim: { ...StyleSheet.absoluteFill, backgroundColor: 'rgba(0,0,0,0.72)' },
   textComposer: { flex: 1, justifyContent: 'center', paddingHorizontal: spacing.xl },
   textField: { minHeight: 120 },
   textInput: { fontSize: 28, fontWeight: '600', textAlign: 'center' },
-  textPreview: { ...StyleSheet.absoluteFillObject },
+  textPreview: { ...StyleSheet.absoluteFill },
   textInputHit: { minHeight: 120 },
   fontBarWrap: {
     backgroundColor: 'rgba(0,0,0,0.35)',

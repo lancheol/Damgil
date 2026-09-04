@@ -8,7 +8,7 @@ import {
   View,
 } from 'react-native';
 
-import { clampStickerScale, normalizeRotation } from './DraggableSticker';
+import { clampStickerScale, normalizeRotation } from '../../utils/stickerTransform';
 import { useLiveDecorTransform } from './useLiveDecorTransform';
 import { DecorTextLayer } from '../../types/diary';
 import { getDecorFontStyle } from '../../utils/decorAssets';
@@ -238,6 +238,7 @@ export function DraggableText({
           marginLeft: -box.width / 2,
           marginTop: -box.height / 2,
           transform: [{ scale: live.scale }, { rotate: `${live.rotation}deg` }],
+          zIndex: typeof layer.zIndex === 'number' ? layer.zIndex : 1,
         },
       ]}
     >

@@ -19,10 +19,10 @@ import { DiaryRecordDetailScreen } from '../screens/main/DiaryRecordDetailScreen
 import { FestivalListScreen } from '../screens/main/FestivalListScreen';
 import { FestivalDetailScreen } from '../screens/main/FestivalDetailScreen';
 import { FeedbackScreen } from '../screens/main/FeedbackScreen';
+import { BlockedUsersScreen } from '../screens/main/BlockedUsersScreen';
 // import { MapRouteScreen } from '../screens/main/MapRouteScreen'; // 길찾기 일시 비활성
 import { ProfileEditScreen } from '../screens/main/ProfileEditScreen';
 import { SettingsScreen } from '../screens/main/SettingsScreen';
-import { TravelSubsidyScreen } from '../screens/main/TravelSubsidyScreen';
 import { AuthNavigator } from './AuthNavigator';
 import { MainTabNavigator } from './MainTabNavigator';
 import { RootStackParamList } from './types';
@@ -57,6 +57,13 @@ export function RootNavigator() {
               }}
             />
             <Stack.Screen
+              name="BlockedUsers"
+              component={BlockedUsersScreen}
+              options={{
+                animation: 'slide_from_right',
+              }}
+            />
+            <Stack.Screen
               name="ProfileEdit"
               component={ProfileEditScreen}
               options={{
@@ -80,13 +87,6 @@ export function RootNavigator() {
             <Stack.Screen
               name="FestivalDetail"
               component={FestivalDetailScreen}
-              options={{
-                animation: 'slide_from_right',
-              }}
-            />
-            <Stack.Screen
-              name="TravelSubsidy"
-              component={TravelSubsidyScreen}
               options={{
                 animation: 'slide_from_right',
               }}

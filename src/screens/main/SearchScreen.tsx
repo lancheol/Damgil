@@ -2,12 +2,14 @@ import { Ionicons } from '@expo/vector-icons';
 import { CompositeScreenProps, useFocusEffect } from '@react-navigation/native';
 import { BottomTabScreenProps } from '@react-navigation/bottom-tabs';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Alert,
   ActivityIndicator,
   Dimensions,
+  FlatList,
   Image,
+  ListRenderItem,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -22,14 +24,15 @@ import { SEARCH_USERS } from '../../constants/users';
 import { useAuth } from '../../context/AuthContext';
 import { useDiaries } from '../../context/DiaryContext';
 import { getPublicFeed } from '../../api/feed';
+import { searchFestivals, searchRegions } from '../../api/search';
 import { loadTokens } from '../../api/tokenStorage';
+import type { FestivalSearchItemDto, RegionSearchItemDto } from '../../api/types';
 import { MainTabParamList, RootStackParamList } from '../../navigation/types';
 import { Diary } from '../../types/diary';
 import { CoverThumb } from '../../components/diary/CoverThumb';
 import { getCoverBackgroundColor, getEffectiveCover } from '../../utils/diaryCover';
 import { colors } from '../../theme';
-import type { Festival } from '../../types/festival';
-import { loadFestivals } from '../../utils/festivals';
+import { createDebounced } from '../../utils/debounce';
 import {
   coverFromStickerLayout,
   feedCardToDiaryStub,
@@ -41,6 +44,44 @@ import { enrichFeedCardsFromPublicTrips } from '../../utils/feedEnrichment';
 import { isDiaryPublished } from '../../utils/tripStatus';
 
 const FEED_RELOAD_COOLDOWN_MS = 45_000;
+const REGION_SEARCH_DEBOUNCE_MS = 300;
+
+function formatRegionLevelLabel(level: RegionSearchItemDto['level']): string {
+  if (level === 'sido') return '시·도';
+  if (level === 'sgg') return '시·군·구';
+  return '읍·면·동';
+}
+
+function formatRegionSubtitle(item: RegionSearchItemDto): string {
+  const parts = [item.sidoName, item.sggName, item.emdName].filter(
+    (part, index, array) => Boolean(part) && array.indexOf(part) === index,
+  );
+  return parts.join(' ');
+}
+
+function formatFestivalDate(value: string | null): string {
+  if (!value) return '';
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return '';
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const day = String(date.getDate()).padStart(2, '0');
+  return `${year}.${month}.${day}`;
+}
+
+function formatFestivalLocation(item: FestivalSearchItemDto): string {
+  if (item.address?.trim()) return item.address.trim();
+  return [item.sidoName, item.regionName, item.emdName].filter(Boolean).join(' ');
+}
+
+function formatFestivalPeriod(item: FestivalSearchItemDto): string {
+  const start = formatFestivalDate(item.eventStartDate);
+  const end = formatFestivalDate(item.eventEndDate);
+  if (start && end) {
+    return start === end ? `${start} 시작` : `${start} ~ ${end}`;
+  }
+  return start ? `${start} 시작` : '';
+}
 
 type Props = CompositeScreenProps<
   BottomTabScreenProps<MainTabParamList, 'Search'>,
@@ -54,30 +95,11 @@ const CARD_WIDTH = (Dimensions.get('window').width - H_PADDING * 2 - GRID_GAP) /
 const MIN_GRID_CELLS = 6;
 const PLACEHOLDER_TONES = ['#D1D5DC', '#E5E7EB', '#F3F4F6'];
 
-type ShortcutConfig = {
-  id: string;
-  icon: keyof typeof Ionicons.glyphMap;
-  title: string;
-  description: string;
-  emoji: string;
+const FESTIVAL_SHORTCUT = {
+  icon: 'flag-outline' as const,
+  title: '축제 및 행사',
+  description: '이번 달 가볼만한 곳',
 };
-
-const SHORTCUTS: ShortcutConfig[] = [
-  {
-    id: 'festival',
-    icon: 'flag-outline',
-    title: '축제 및 행사',
-    description: '이번 달 가볼만한 곳',
-    emoji: '🎉',
-  },
-  {
-    id: 'fund',
-    icon: 'cash-outline',
-    title: '여행지원금',
-    description: '알뜰하게 떠나기',
-    emoji: '💰',
-  },
-];
 
 type GridCell =
   | { kind: 'feed'; key: string; card: FeedDiaryCard }
@@ -87,27 +109,52 @@ export function SearchScreen({ navigation }: Props) {
   const { user } = useAuth();
   const { diaries, openPublicDiary } = useDiaries();
   const [query, setQuery] = useState('');
-  const [festivals, setFestivals] = useState<Festival[]>([]);
+  const [regionResults, setRegionResults] = useState<RegionSearchItemDto[]>([]);
+  const [festivalResults, setFestivalResults] = useState<FestivalSearchItemDto[]>([]);
+  const [searchLoading, setSearchLoading] = useState(false);
   const [feedCards, setFeedCards] = useState<FeedDiaryCard[]>([]);
   const [feedLoading, setFeedLoading] = useState(true);
   const [openingId, setOpeningId] = useState<string | null>(null);
   const feedRequestRef = useRef(0);
   const feedLoadedRef = useRef(false);
   const lastFeedLoadAtRef = useRef(0);
+  const searchRequestRef = useRef(0);
 
-  useEffect(() => {
-    let cancelled = false;
-    void loadFestivals()
-      .then((items) => {
-        if (!cancelled) setFestivals(items);
-      })
-      .catch(() => {
-        if (!cancelled) setFestivals([]);
-      });
-    return () => {
-      cancelled = true;
-    };
+  const fetchSearchResults = useCallback(async (keyword: string) => {
+    const requestId = searchRequestRef.current + 1;
+    searchRequestRef.current = requestId;
+
+    if (!keyword) {
+      setRegionResults([]);
+      setFestivalResults([]);
+      setSearchLoading(false);
+      return;
+    }
+
+    setSearchLoading(true);
+    try {
+      const [regionResponse, festivalResponse] = await Promise.all([
+        searchRegions({ q: keyword, page: 1, pageSize: 20 }),
+        searchFestivals({ q: keyword, page: 1, pageSize: 20 }),
+      ]);
+      if (searchRequestRef.current !== requestId) return;
+      setRegionResults(regionResponse.items ?? []);
+      setFestivalResults(festivalResponse.items ?? []);
+    } catch {
+      if (searchRequestRef.current !== requestId) return;
+      setRegionResults([]);
+      setFestivalResults([]);
+    } finally {
+      if (searchRequestRef.current === requestId) {
+        setSearchLoading(false);
+      }
+    }
   }, []);
+
+  const debouncedSearch = useMemo(
+    () => createDebounced((keyword: string) => { void fetchSearchResults(keyword); }, REGION_SEARCH_DEBOUNCE_MS),
+    [fetchSearchResults],
+  );
 
   const loadFeed = useCallback(async (silent: boolean) => {
     const requestId = feedRequestRef.current + 1;
@@ -204,31 +251,113 @@ export function SearchScreen({ navigation }: Props) {
     return [...feed, ...fillers];
   }, [feedCards]);
 
-  const openFeedDiary = async (card: FeedDiaryCard) => {
-    if (openingId) return;
-    setOpeningId(card.id);
-    try {
-      const result = await openPublicDiary(card.id);
-      if (result.status === 'gone') {
-        setFeedCards((prev) => prev.filter((item) => item.id !== card.id));
-        return;
+  const openingIdRef = useRef<string | null>(null);
+
+  const openFeedDiary = useCallback(
+    async (card: FeedDiaryCard) => {
+      if (openingIdRef.current) return;
+      openingIdRef.current = card.id;
+      setOpeningId(card.id);
+      try {
+        const result = await openPublicDiary(card.id);
+        if (result.status === 'gone') {
+          setFeedCards((prev) => prev.filter((item) => item.id !== card.id));
+          return;
+        }
+        if (result.status !== 'ok') return;
+        const isMine = user?.id != null && card.userId === user.id;
+        navigation.navigate('DiaryEdit', {
+          diaryId: result.diary.id,
+          mode: isMine && !isDiaryPublished(result.diary) ? 'edit' : 'view',
+          liked: card.liked,
+          likeCount: card.likeCount,
+          commentCount: card.commentCount,
+        });
+      } finally {
+        openingIdRef.current = null;
+        setOpeningId(null);
       }
-      if (result.status !== 'ok') return;
-      const isMine = user?.id != null && card.userId === user.id;
-      navigation.navigate('DiaryEdit', {
-        diaryId: result.diary.id,
-        mode: isMine && !isDiaryPublished(result.diary) ? 'edit' : 'view',
-        liked: card.liked,
-        likeCount: card.likeCount,
-        commentCount: card.commentCount,
-      });
-    } finally {
-      setOpeningId(null);
-    }
-  };
+    },
+    [navigation, openPublicDiary, user?.id],
+  );
+
+  const handleFeedCardPress = useCallback(
+    (card: FeedDiaryCard) => {
+      void openFeedDiary(card);
+    },
+    [openFeedDiary],
+  );
+
+  const renderFeedCell = useCallback<ListRenderItem<GridCell>>(
+    ({ item }) => {
+      if (item.kind === 'placeholder') {
+        return <View style={[styles.thumb, { backgroundColor: item.tone }]} />;
+      }
+      return (
+        <FeedDiaryCell
+          card={item.card}
+          busy={openingId === item.card.id}
+          onPressCard={handleFeedCardPress}
+        />
+      );
+    },
+    [handleFeedCardPress, openingId],
+  );
+
+  const feedListHeader = useMemo(
+    () => (
+      <View>
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel={FESTIVAL_SHORTCUT.title}
+          onPress={() => navigation.navigate('FestivalList')}
+          style={({ pressed }) => [styles.festivalShortcut, pressed && styles.pressed]}
+        >
+          <View style={styles.festivalShortcutIcon}>
+            <Ionicons name={FESTIVAL_SHORTCUT.icon} size={18} color="#374151" />
+          </View>
+          <View style={styles.festivalShortcutBody}>
+            <Text style={styles.festivalShortcutTitle}>{FESTIVAL_SHORTCUT.title}</Text>
+            <Text style={styles.festivalShortcutDescription}>{FESTIVAL_SHORTCUT.description}</Text>
+          </View>
+          <Ionicons name="chevron-forward" size={18} color="#9CA3AF" />
+        </Pressable>
+
+        <Text style={styles.sectionTitle}>요즘 뜨는 여행 다이어리</Text>
+
+        {feedLoading && feedCards.length === 0 ? (
+          <View style={styles.feedLoading}>
+            <ActivityIndicator color={colors.ink} />
+          </View>
+        ) : null}
+      </View>
+    ),
+    [feedCards.length, feedLoading, navigation],
+  );
 
   const keyword = query.trim();
   const isSearching = keyword.length > 0;
+
+  useEffect(() => {
+    if (!isSearching) {
+      debouncedSearch.cancel();
+      searchRequestRef.current += 1;
+      setRegionResults([]);
+      setFestivalResults([]);
+      setSearchLoading(false);
+      return;
+    }
+
+    debouncedSearch.schedule(keyword);
+    return () => {
+      debouncedSearch.cancel();
+    };
+  }, [debouncedSearch, isSearching, keyword]);
+
+  const handleSearchSubmit = useCallback(() => {
+    if (!isSearching) return;
+    debouncedSearch.flush();
+  }, [debouncedSearch, isSearching]);
 
   const userResults = useMemo(() => {
     if (!isSearching) {
@@ -238,17 +367,7 @@ export function SearchScreen({ navigation }: Props) {
     return SEARCH_USERS.filter((user) => user.username.toLowerCase().includes(needle));
   }, [isSearching, keyword]);
 
-  const placeResults = useMemo(() => {
-    if (!isSearching) {
-      return [];
-    }
-    const needle = keyword.toLowerCase();
-    return festivals.filter((festival) =>
-      `${festival.region} ${festival.district} ${festival.address ?? ''} ${festival.title}`
-        .toLowerCase()
-        .includes(needle),
-    ).slice(0, 5);
-  }, [festivals, isSearching, keyword]);
+  const placeResults = regionResults;
 
   const diaryResults = useMemo(() => {
     if (!isSearching) {
@@ -267,6 +386,12 @@ export function SearchScreen({ navigation }: Props) {
       );
   }, [diaries, isSearching, keyword]);
 
+  const hasResultSections =
+    userResults.length > 0 ||
+    placeResults.length > 0 ||
+    festivalResults.length > 0 ||
+    diaryResults.length > 0;
+
   return (
     <SafeAreaView style={styles.safe} edges={['top']}>
       <View style={styles.header}>
@@ -277,9 +402,10 @@ export function SearchScreen({ navigation }: Props) {
           <TextInput
             value={query}
             onChangeText={setQuery}
-            placeholder="사용자 이름 또는 지역 검색 (엔터)"
+            placeholder="사용자, 지역, 축제 검색"
             placeholderTextColor="#99A1AF"
             returnKeyType="search"
+            onSubmitEditing={handleSearchSubmit}
             style={styles.searchInput}
           />
           {isSearching ? (
@@ -342,48 +468,84 @@ export function SearchScreen({ navigation }: Props) {
             </>
           ) : null}
 
+          {searchLoading && !hasResultSections ? (
+            <View style={styles.regionLoading}>
+              <ActivityIndicator color={colors.ink} />
+            </View>
+          ) : null}
+
           {placeResults.length > 0 ? (
             <>
               <Text style={userResults.length > 0 ? styles.resultTitleSpaced : styles.resultTitle}>
-                {`'${keyword}' 여행 정보`}
+                지역 검색 결과
               </Text>
 
               <View style={styles.placeList}>
-                {placeResults.map((festival) => (
+                {placeResults.map((region) => (
+                  <Pressable
+                    key={region.regionId}
+                    accessibilityRole="button"
+                    accessibilityLabel={`${region.name} 지역`}
+                    onPress={() => setQuery(region.name)}
+                    style={({ pressed }) => [styles.placeCard, pressed && styles.pressed]}
+                  >
+                    <View style={styles.placeThumb}>
+                      <Ionicons name="location-outline" size={22} color="#6A7282" />
+                    </View>
+
+                    <View style={styles.placeBody}>
+                      <Text style={styles.placeLabel}>{formatRegionLevelLabel(region.level)}</Text>
+                      <Text style={styles.placeTitle} numberOfLines={1}>
+                        {region.name}
+                      </Text>
+                      <Text style={styles.placeDescription} numberOfLines={1}>
+                        {formatRegionSubtitle(region)}
+                      </Text>
+                    </View>
+                  </Pressable>
+                ))}
+              </View>
+            </>
+          ) : null}
+
+          {festivalResults.length > 0 ? (
+            <>
+              <Text
+                style={
+                  userResults.length > 0 || placeResults.length > 0
+                    ? styles.resultTitleSpaced
+                    : styles.resultTitle
+                }
+              >
+                {`'${keyword}' 축제·행사`}
+              </Text>
+
+              <View style={styles.placeList}>
+                {festivalResults.map((festival) => (
                   <Pressable
                     key={festival.id}
                     accessibilityRole="button"
-                    accessibilityLabel={`${festival.title} 상세`}
+                    accessibilityLabel={`${festival.name} 상세`}
                     onPress={() =>
                       navigation.navigate('FestivalDetail', {
-                        contentId: festival.id,
-                        titleHint: festival.title,
+                        contentId: festival.externalId,
+                        titleHint: festival.name,
                       })
                     }
                     style={({ pressed }) => [styles.placeCard, pressed && styles.pressed]}
                   >
                     <View style={styles.placeThumb}>
-                      {festival.imageUri ? (
-                        <Image
-                          source={{ uri: festival.imageUri }}
-                          style={styles.placeThumbImage}
-                          resizeMode="cover"
-                        />
-                      ) : (
-                        <Ionicons name="image-outline" size={20} color="#9CA3AF" />
-                      )}
+                      <Ionicons name="flag-outline" size={22} color="#6A7282" />
                     </View>
 
                     <View style={styles.placeBody}>
                       <Text style={styles.placeLabel}>지역 명소 및 축제</Text>
                       <Text style={styles.placeTitle} numberOfLines={1}>
-                        {festival.title}
+                        {festival.name}
                       </Text>
                       <Text style={styles.placeDescription} numberOfLines={1}>
-                        {festival.address || `${festival.region} ${festival.district}`}
-                        {festival.startDate
-                          ? ` · ${festival.startDate.replace(/-/g, '.')} 시작`
-                          : ''}
+                        {formatFestivalLocation(festival)}
+                        {formatFestivalPeriod(festival) ? ` · ${formatFestivalPeriod(festival)}` : ''}
                       </Text>
                     </View>
                   </Pressable>
@@ -396,7 +558,9 @@ export function SearchScreen({ navigation }: Props) {
             <>
               <Text
                 style={
-                  userResults.length > 0 || placeResults.length > 0
+                  userResults.length > 0 ||
+                  placeResults.length > 0 ||
+                  festivalResults.length > 0
                     ? styles.resultTitleSpaced
                     : styles.resultTitle
                 }
@@ -421,68 +585,31 @@ export function SearchScreen({ navigation }: Props) {
             </>
           ) : null}
 
-          {userResults.length === 0 && placeResults.length === 0 && diaryResults.length === 0 ? (
+          {!searchLoading && !hasResultSections ? (
             <Text style={styles.emptyText}>{`'${keyword}'에 대한 검색 결과가 없어요.`}</Text>
           ) : null}
         </ScrollView>
       ) : (
-        <ScrollView
+        <FlatList
+          data={feedLoading && feedCards.length === 0 ? [] : cells}
+          keyExtractor={(item) => item.key}
+          numColumns={2}
+          columnWrapperStyle={styles.gridRow}
           contentContainerStyle={styles.content}
           showsVerticalScrollIndicator={false}
           keyboardShouldPersistTaps="handled"
           keyboardDismissMode="on-drag"
-        >
-          <View style={styles.shortcutRow}>
-            {SHORTCUTS.map((shortcut) => (
-              <Pressable
-                key={shortcut.id}
-                accessibilityRole="button"
-                accessibilityLabel={shortcut.title}
-                onPress={() => {
-                  if (shortcut.id === 'festival') {
-                    navigation.navigate('FestivalList');
-                  } else if (shortcut.id === 'fund') {
-                    navigation.navigate('TravelSubsidy');
-                  }
-                }}
-                style={({ pressed }) => [styles.shortcutCard, pressed && styles.pressed]}
-              >
-                <Text style={styles.shortcutEmoji}>{shortcut.emoji}</Text>
-                <View style={styles.shortcutIcon}>
-                  <Ionicons name={shortcut.icon} size={16} color="#374151" />
-                </View>
-                <Text style={styles.shortcutTitle}>{shortcut.title}</Text>
-                <Text style={styles.shortcutDescription}>{shortcut.description}</Text>
-              </Pressable>
-            ))}
-          </View>
-
-          <Text style={styles.sectionTitle}>요즘 뜨는 여행 다이어리</Text>
-
-          {feedLoading && feedCards.length === 0 ? (
-            <View style={styles.feedLoading}>
-              <ActivityIndicator color={colors.ink} />
-            </View>
-          ) : (
-            <View style={styles.grid}>
-              {cells.map((cell) =>
-                cell.kind === 'placeholder' ? (
-                  <View key={cell.key} style={[styles.thumb, { backgroundColor: cell.tone }]} />
-                ) : (
-                  <FeedDiaryCell
-                    key={cell.key}
-                    card={cell.card}
-                    busy={openingId === cell.card.id}
-                    onPress={() => void openFeedDiary(cell.card)}
-                  />
-                ),
-              )}
-            </View>
-          )}
-          {!feedLoading && feedCards.length === 0 ? (
-            <Text style={styles.feedEmptyText}>아직 공개된 여행 다이어리가 없어요.</Text>
-          ) : null}
-        </ScrollView>
+          ListHeaderComponent={feedListHeader}
+          ListEmptyComponent={
+            !feedLoading && feedCards.length === 0 ? (
+              <Text style={styles.feedEmptyText}>아직 공개된 여행 다이어리가 없어요.</Text>
+            ) : null
+          }
+          renderItem={renderFeedCell}
+          initialNumToRender={6}
+          windowSize={7}
+          removeClippedSubviews
+        />
       )}
     </SafeAreaView>
   );
@@ -493,7 +620,7 @@ type DiaryCellProps = {
   onPress: () => void;
 };
 
-function DiaryCell({ diary, onPress }: DiaryCellProps) {
+const DiaryCell = memo(function DiaryCell({ diary, onPress }: DiaryCellProps) {
   const cover = getEffectiveCover(diary);
   const title = cover.title?.trim() || diary.name;
   const likeCount = diary.likeCount ?? 0;
@@ -517,16 +644,20 @@ function DiaryCell({ diary, onPress }: DiaryCellProps) {
       </View>
     </Pressable>
   );
-}
+});
 
 type FeedDiaryCellProps = {
   card: FeedDiaryCard;
   busy?: boolean;
-  onPress: () => void;
+  onPressCard: (card: FeedDiaryCard) => void;
 };
 
-function FeedDiaryCell({ card, busy, onPress }: FeedDiaryCellProps) {
-  const stubDiary = feedCardToDiaryStub(card);
+const FeedDiaryCell = memo(function FeedDiaryCell({
+  card,
+  busy,
+  onPressCard,
+}: FeedDiaryCellProps) {
+  const stubDiary = useMemo(() => feedCardToDiaryStub(card), [card]);
   const cover = getEffectiveCover(stubDiary);
 
   return (
@@ -534,7 +665,7 @@ function FeedDiaryCell({ card, busy, onPress }: FeedDiaryCellProps) {
       accessibilityRole="button"
       accessibilityLabel={`${card.title} 다이어리`}
       disabled={busy}
-      onPress={onPress}
+      onPress={() => onPressCard(card)}
       style={({ pressed }) => [
         styles.thumb,
         { backgroundColor: getCoverBackgroundColor(cover) },
@@ -548,7 +679,7 @@ function FeedDiaryCell({ card, busy, onPress }: FeedDiaryCellProps) {
       </View>
     </Pressable>
   );
-}
+});
 
 const styles = StyleSheet.create({
   safe: {
@@ -602,55 +733,46 @@ const styles = StyleSheet.create({
     paddingHorizontal: H_PADDING,
     paddingBottom: 120,
   },
-  shortcutRow: {
+  festivalShortcut: {
     flexDirection: 'row',
-    gap: 12,
-    paddingTop: 16,
-  },
-  shortcutCard: {
-    flex: 1,
-    height: 133,
-    padding: 16,
+    alignItems: 'center',
+    gap: 14,
+    marginTop: 16,
+    paddingHorizontal: 16,
+    paddingVertical: 18,
     borderRadius: 16,
     backgroundColor: '#F9FAFB',
     borderWidth: StyleSheet.hairlineWidth,
     borderColor: '#E5E7EB',
-    overflow: 'hidden',
     shadowColor: colors.black,
     shadowOpacity: 0.1,
     shadowRadius: 3,
     shadowOffset: { width: 0, height: 1 },
     elevation: 1,
   },
-  shortcutEmoji: {
-    position: 'absolute',
-    right: -8,
-    bottom: -14,
-    fontSize: 60,
-    lineHeight: 60,
-    opacity: 0.1,
-  },
-  shortcutIcon: {
-    width: 32,
-    height: 32,
-    borderRadius: 16,
+  festivalShortcutIcon: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
     alignItems: 'center',
     justifyContent: 'center',
     backgroundColor: colors.white,
     borderWidth: StyleSheet.hairlineWidth,
     borderColor: '#E5E7EB',
-    marginBottom: 12,
   },
-  shortcutTitle: {
-    fontSize: 14,
-    lineHeight: 20,
+  festivalShortcutBody: {
+    flex: 1,
+    gap: 4,
+  },
+  festivalShortcutTitle: {
+    fontSize: 15,
+    lineHeight: 22,
     fontWeight: '600',
     color: '#1E2939',
-    marginBottom: 4,
   },
-  shortcutDescription: {
-    fontSize: 12,
-    lineHeight: 16,
+  festivalShortcutDescription: {
+    fontSize: 13,
+    lineHeight: 18,
     color: '#6A7282',
   },
   sectionTitle: {
@@ -671,6 +793,12 @@ const styles = StyleSheet.create({
     fontSize: 13,
     lineHeight: 18,
     color: '#99A1AF',
+  },
+  regionLoading: {
+    marginTop: 16,
+    minHeight: 80,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   resultTitle: {
     marginTop: 16,
@@ -784,6 +912,10 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     flexWrap: 'wrap',
     gap: GRID_GAP,
+  },
+  gridRow: {
+    gap: GRID_GAP,
+    marginTop: GRID_GAP,
   },
   thumb: {
     width: CARD_WIDTH,

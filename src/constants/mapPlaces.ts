@@ -1,4 +1,11 @@
-export type MapPlaceCategory = '음식점' | '카페' | '관광지' | '문화시설' | '체험' | '쇼핑';
+export type MapPlaceCategory =
+  | '음식점'
+  | '카페'
+  | '관광지'
+  | '문화시설'
+  | '체험'
+  | '쇼핑'
+  | '기타';
 
 export type MapPlace = {
   id: string;
@@ -12,6 +19,7 @@ export type MapPlace = {
   longitude: number;
 };
 
+/** API SavedMarkerCategoryCode 7종과 1:1 (숙박 없음) */
 export const MAP_CATEGORIES: MapPlaceCategory[] = [
   '음식점',
   '카페',
@@ -19,6 +27,7 @@ export const MAP_CATEGORIES: MapPlaceCategory[] = [
   '문화시설',
   '체험',
   '쇼핑',
+  '기타',
 ];
 
 export const MAP_INITIAL_REGION = {

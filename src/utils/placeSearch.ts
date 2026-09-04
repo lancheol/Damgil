@@ -1,17 +1,17 @@
+import { searchMapPlaces } from '../api/map';
 import { getPlaceDetail, searchPlaces } from '../api/places';
+import { loadTokens } from '../api/tokenStorage';
 import { TourApiPlaceItem } from '../api/types';
 import type { MapPlace, MapPlaceCategory } from '../constants/mapPlaces';
-import { categoryFromContentTypeId } from './savedMapPlaces';
+import type { MapLocation } from '../types/mapLocation';
+import {
+  categoryFromContentTypeId,
+  categoryFromMarkerCode,
+  mapLocationFromMapMarker,
+  markerCategoriesFromMapCategories,
+} from './savedMapPlaces';
 
-export type MapLocation = {
-  name: string;
-  latitude: number;
-  longitude: number;
-  address?: string;
-  contentTypeId?: string;
-  /** TourAPI / PlaceCache contentId — 위치 확정 API에 필요 */
-  contentId?: string;
-};
+export type { MapLocation } from '../types/mapLocation';
 
 /** 맵 카테고리 → TourAPI contentTypeId (검색 type 쿼리) */
 export function tourTypeFromMapCategory(
@@ -87,7 +87,9 @@ export function mapPlaceFromSearch(location: MapLocation): MapPlace | null {
   return {
     id: contentId,
     name: location.name.trim() || '장소',
-    category: categoryFromContentTypeId(location.contentTypeId),
+    category: location.categoryCode
+      ? categoryFromMarkerCode(location.categoryCode)
+      : categoryFromContentTypeId(location.contentTypeId),
     address: location.address?.trim() || '',
     distanceKm: 0,
     photoCount: 0,
@@ -96,7 +98,33 @@ export function mapPlaceFromSearch(location: MapLocation): MapPlace | null {
   };
 }
 
-/** 키워드로 여행 장소 검색 (TourAPI place_cache) */
+/** 지도 상단 검색 — GET /map/search */
+export async function searchMapTravelPlaces(
+  query: string,
+  options?: { rows?: number; categories?: MapPlaceCategory[] },
+): Promise<MapLocation[]> {
+  const trimmed = query.trim();
+  if (!trimmed) {
+    return [];
+  }
+
+  try {
+    const tokens = await loadTokens();
+    const category = markerCategoriesFromMapCategories(options?.categories ?? []);
+    const response = await searchMapPlaces(tokens?.access, {
+      q: trimmed,
+      rows: options?.rows ?? 10,
+      ...(category ? { category } : {}),
+    });
+    return (response.items ?? [])
+      .map(mapLocationFromMapMarker)
+      .filter((item): item is MapLocation => item != null);
+  } catch {
+    return [];
+  }
+}
+
+/** 키워드로 여행 장소 검색 (TourAPI place_cache) — 지도 외 화면용 */
 export async function searchTravelPlaces(
   query: string,
   options?: { type?: string; rows?: number },

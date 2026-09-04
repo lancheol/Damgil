@@ -1,11 +1,12 @@
-/** 지역 상세 검색에서 선택한 시·도 + 세부 지역 */
+/** 지역 상세 검색에서 선택한 시·도 + 시·군·구 */
 export type RegionSelection = {
+  sidoId: string;
+  regionId: string;
   region: string;
   district: string;
 };
 
-export const regionSelectionKey = ({ region, district }: RegionSelection) =>
-  `${region}|${district}`;
+export const regionSelectionKey = ({ regionId }: RegionSelection) => regionId;
 
 export type Festival = {
   id: string;

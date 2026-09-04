@@ -27,17 +27,45 @@ type ModeConfig = {
   id: TravelMode;
   label: string;
   icon: keyof typeof Ionicons.glyphMap;
-  /** 경로 API 연동 전 예상 시간 계산용 평균 속도 */
-  speedKmh: number;
   appleDirFlag: string;
   googleTravelMode: string;
+  /** false면 서버/카카오 미지원 — 선택 불가 (supported:false와 동일 UX) */
+  supported: boolean;
 };
 
 const MODES: ModeConfig[] = [
-  { id: 'car', label: '승용차', icon: 'car', speedKmh: 24, appleDirFlag: 'd', googleTravelMode: 'driving' },
-  { id: 'transit', label: '대중교통', icon: 'bus', speedKmh: 17, appleDirFlag: 'r', googleTravelMode: 'transit' },
-  { id: 'walk', label: '도보', icon: 'walk', speedKmh: 4.5, appleDirFlag: 'w', googleTravelMode: 'walking' },
-  { id: 'bike', label: '자전거', icon: 'bicycle', speedKmh: 13, appleDirFlag: 'w', googleTravelMode: 'bicycling' },
+  {
+    id: 'car',
+    label: '승용차',
+    icon: 'car',
+    appleDirFlag: 'd',
+    googleTravelMode: 'driving',
+    supported: true,
+  },
+  {
+    id: 'transit',
+    label: '대중교통',
+    icon: 'bus',
+    appleDirFlag: 'r',
+    googleTravelMode: 'transit',
+    supported: false,
+  },
+  {
+    id: 'walk',
+    label: '도보',
+    icon: 'walk',
+    appleDirFlag: 'w',
+    googleTravelMode: 'walking',
+    supported: false,
+  },
+  {
+    id: 'bike',
+    label: '자전거',
+    icon: 'bicycle',
+    appleDirFlag: 'w',
+    googleTravelMode: 'bicycling',
+    supported: false,
+  },
 ];
 
 /** 위치 권한이 없을 때 사용하는 기본 출발지 (성수역) */
@@ -93,7 +121,11 @@ export function MapRouteScreen({ navigation, route }: Props) {
   }, []);
 
   const path = useMemo(() => buildRoutePath(origin, destination), [origin, destination]);
-  const distanceKm = useMemo(() => haversineKm(origin, destination), [origin, destination]);
+  /** 직선거리(km) — 길찾기 API distanceMeters와 혼용 금지 */
+  const straightDistanceKm = useMemo(
+    () => haversineKm(origin, destination),
+    [origin, destination],
+  );
 
   useEffect(() => {
     mapRef.current?.fitToCoordinates([origin, destination], {
@@ -103,8 +135,11 @@ export function MapRouteScreen({ navigation, route }: Props) {
   }, [origin, destination]);
 
   const activeMode = MODES.find((item) => item.id === mode) ?? MODES[0];
-  const minutes = Math.max(1, Math.round((distanceKm / activeMode.speedKmh) * 60));
-  const distanceLabel = distanceKm.toFixed(1);
+  const routeSupported = activeMode.supported;
+  const straightDistanceLabel =
+    straightDistanceKm < 0.1
+      ? `${Math.max(1, Math.round(straightDistanceKm * 1000))}m`
+      : `${straightDistanceKm.toFixed(1)}km`;
 
   const applyPlaceSearch = (text: string, target: 'origin' | 'destination') => {
     const trimmed = text.trim();
@@ -245,52 +280,82 @@ export function MapRouteScreen({ navigation, route }: Props) {
         <View style={styles.modeRow}>
           {MODES.map((item) => {
             const active = item.id === mode;
+            const disabled = !item.supported;
             return (
               <Pressable
                 key={item.id}
                 accessibilityRole="button"
-                accessibilityState={active ? { selected: true } : {}}
-                style={[styles.modeItem, active && styles.modeItemActive]}
+                accessibilityState={{
+                  selected: active,
+                  disabled,
+                }}
+                disabled={disabled}
+                style={[
+                  styles.modeItem,
+                  active && styles.modeItemActive,
+                  disabled && styles.modeItemDisabled,
+                ]}
                 onPress={() => {
                   Keyboard.dismiss();
                   setMode(item.id);
                 }}
               >
-                <Ionicons name={item.icon} size={20} color={active ? '#101828' : '#99A1AF'} />
-                <Text style={[styles.modeLabel, active && styles.modeLabelActive]}>
+                <Ionicons
+                  name={item.icon}
+                  size={20}
+                  color={disabled ? '#D1D5DB' : active ? '#101828' : '#99A1AF'}
+                />
+                <Text
+                  style={[
+                    styles.modeLabel,
+                    active && styles.modeLabelActive,
+                    disabled && styles.modeLabelDisabled,
+                  ]}
+                >
                   {item.label}
                 </Text>
               </Pressable>
             );
           })}
         </View>
+        <Text style={styles.modeHint}>대중교통·도보·자전거는 경로 안내 준비 중이에요.</Text>
       </View>
 
       <View style={[styles.bottomArea, { paddingBottom: insets.bottom + spacing.lg }]}>
         <View style={styles.card}>
-          <View style={styles.cardHeader}>
-            <View style={styles.cardBadge}>
-              <Text style={styles.cardBadgeText}>최적 경로</Text>
-            </View>
-            <Text style={styles.cardCost}>{costLabel(activeMode.id, distanceKm)}</Text>
-          </View>
-
-          <View style={styles.durationRow}>
-            {formatDuration(minutes).map((part) => (
-              <View key={part.unit} style={styles.durationPart}>
-                <Text style={styles.durationValue}>{part.value}</Text>
-                <Text style={styles.durationUnit}>{part.unit}</Text>
+          {routeSupported ? (
+            <>
+              <View style={styles.cardHeader}>
+                <View style={styles.cardBadge}>
+                  <Text style={styles.cardBadgeText}>직선 거리</Text>
+                </View>
               </View>
-            ))}
-          </View>
 
-          <Text style={styles.cardDetail}>
-            {distanceLabel}km · {detailLabel(activeMode.id)}
-          </Text>
+              <Text style={styles.straightDistanceValue}>{straightDistanceLabel}</Text>
+              <Text style={styles.cardDetail}>
+                현위치 기준 직선거리예요. 실제 이동거리는 안내 시작 후 확인할 수 있어요.
+              </Text>
 
-          <Pressable accessibilityRole="button" style={styles.startButton} onPress={startNavigation}>
-            <Text style={styles.startButtonText}>안내 시작</Text>
-          </Pressable>
+              <Pressable
+                accessibilityRole="button"
+                style={styles.startButton}
+                onPress={startNavigation}
+              >
+                <Text style={styles.startButtonText}>안내 시작</Text>
+              </Pressable>
+            </>
+          ) : (
+            <>
+              <View style={styles.cardHeader}>
+                <View style={styles.cardBadge}>
+                  <Text style={styles.cardBadgeText}>경로 안내 준비 중</Text>
+                </View>
+              </View>
+              <Text style={styles.cardDetail}>
+                이 이동 수단은 아직 경로를 제공하지 않아요. 승용차를 선택해 주세요.
+              </Text>
+            </>
+          )}
         </View>
       </View>
     </View>
@@ -509,6 +574,9 @@ const styles = StyleSheet.create({
   modeItemActive: {
     borderBottomColor: '#101828',
   },
+  modeItemDisabled: {
+    opacity: 0.55,
+  },
   modeLabel: {
     fontSize: 10,
     fontWeight: '700',
@@ -516,6 +584,15 @@ const styles = StyleSheet.create({
   },
   modeLabelActive: {
     color: '#101828',
+  },
+  modeLabelDisabled: {
+    color: '#D1D5DB',
+  },
+  modeHint: {
+    marginTop: spacing.sm,
+    fontSize: 12,
+    lineHeight: 16,
+    color: '#99A1AF',
   },
   bottomArea: {
     position: 'absolute',
@@ -552,31 +629,10 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     color: '#155DFC',
   },
-  cardCost: {
-    fontSize: 12,
-    fontWeight: '500',
-    color: '#6A7282',
-  },
-  durationRow: {
-    flexDirection: 'row',
-    alignItems: 'flex-end',
-    gap: spacing.md,
+  straightDistanceValue: {
     paddingTop: spacing.md,
-  },
-  durationPart: {
-    flexDirection: 'row',
-    alignItems: 'flex-end',
-    gap: spacing.xs,
-  },
-  durationValue: {
     fontSize: 30,
     lineHeight: 36,
-    fontWeight: '700',
-    color: '#101828',
-  },
-  durationUnit: {
-    fontSize: 18,
-    lineHeight: 28,
     fontWeight: '700',
     color: '#101828',
   },

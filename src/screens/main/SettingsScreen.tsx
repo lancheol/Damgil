@@ -45,15 +45,47 @@ const FALLBACK_MENU: SettingsMenuItemDto[] = [{ key: 'feedback' }];
 const ACCOUNT_MENU_KEYS = new Set(['logout', 'withdrawal']);
 const DOCUMENT_MENU_KEYS = new Set(['guide', 'terms', 'privacy_policy']);
 
-function formatDeletionPreviewMessage(willDelete: Record<string, number>): string {
-  const parts = Object.entries(willDelete)
-    .filter(([, count]) => typeof count === 'number' && count > 0)
-    .map(([key, count]) => `${key} ${count}건`);
+/** willDelete API 키 → 사용자용 라벨 (모르는 키는 숨김) */
+const DELETION_LABELS: Record<string, string> = {
+  trips: '여행 다이어리',
+  trip: '여행 다이어리',
+  diary: '여행 다이어리',
+  diaries: '여행 다이어리',
+  diary_editor: '편집 중인 다이어리',
+  media: '사진·영상',
+  medias: '사진·영상',
+  profile: '프로필',
+  comments: '댓글',
+  likes: '좋아요',
+  saves: '저장한 장소',
+  behavior_data: '이용 기록',
+  behavior: '이용 기록',
+  misc: '기타 데이터',
+};
 
-  if (parts.length === 0) {
-    return '탈퇴하면 계정과 관련 데이터가 삭제되며 되돌릴 수 없습니다.';
+function formatDeletionPreviewMessage(willDelete: Record<string, number>): string {
+  const lines = Object.entries(willDelete)
+    .filter(([, count]) => typeof count === 'number' && count > 0)
+    .map(([key, count]) => {
+      const label = DELETION_LABELS[key] ?? DELETION_LABELS[key.toLowerCase()];
+      if (!label) {
+        return null;
+      }
+      return `· ${label} ${count}개`;
+    })
+    .filter((line): line is string => Boolean(line));
+
+  if (lines.length === 0) {
+    return '탈퇴하면 계정과 관련 데이터가 삭제되며 되돌릴 수 없습니다.\n계속할까요?';
   }
-  return `삭제 예정: ${parts.join(', ')}\n탈퇴하면 되돌릴 수 없습니다.`;
+
+  return [
+    '탈퇴하면 아래 데이터가 삭제되며 되돌릴 수 없습니다.',
+    '',
+    ...lines,
+    '',
+    '계속할까요?',
+  ].join('\n');
 }
 
 function getMenuLabel(item: SettingsMenuItemDto): string {
@@ -273,6 +305,18 @@ export function SettingsScreen({ navigation }: Props) {
               );
             })
           )}
+        </View>
+
+        <View style={styles.card}>
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel="차단한 사용자"
+            onPress={() => navigation.navigate('BlockedUsers')}
+            style={({ pressed }) => [styles.row, pressed && styles.rowPressed]}
+          >
+            <Text style={styles.rowLabel}>차단한 사용자</Text>
+            <Ionicons name="chevron-forward" size={16} color="#99A1AF" />
+          </Pressable>
         </View>
 
         <View style={styles.accountActions}>

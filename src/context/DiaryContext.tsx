@@ -117,7 +117,6 @@ function normalizeDecoration(decoration: PhotoDecoration | null | undefined): Ph
   }
   const texts = resolveDecorationTexts(decoration);
   const built = buildPhotoDecoration({
-    stickers: Array.isArray(decoration.stickers) ? decoration.stickers : [],
     texts,
     cropRect: decoration.cropRect,
   });
@@ -140,6 +139,7 @@ function normalizeDiary(diary: Diary): Diary {
     likeCount: diary.likeCount ?? 0,
     commentCount: diary.commentCount ?? 0,
     coverThumbUrl: diary.coverThumbUrl ?? null,
+    userId: diary.userId ?? null,
     placesSetupAt: diary.placesSetupAt ?? null,
     placeSelections: Array.isArray(diary.placeSelections)
       ? diary.placeSelections.map((selection) => ({
@@ -175,7 +175,7 @@ function withUpdatedAt(cover: Omit<DiaryCover, 'updatedAt'> | DiaryCover): Diary
   return {
     ...cover,
     title: cover.title.trim(),
-    stickers: cover.stickers ?? [],
+    stickers: [],
     photos: Array.isArray(cover.photos) ? cover.photos : [],
     texts: Array.isArray(cover.texts) ? cover.texts : [],
     updatedAt: new Date().toISOString(),
@@ -283,7 +283,7 @@ export function DiaryProvider({ children }: PropsWithChildren) {
     if (!isReady) {
       return;
     }
-    persistDiariesRef.current(diaries);
+    persistDiariesRef.current.schedule(diaries);
   }, [diaries, isReady]);
 
   useEffect(() => {
@@ -775,7 +775,7 @@ export function DiaryProvider({ children }: PropsWithChildren) {
               titleRotation: nextCover.titleRotation,
               titleColor: nextCover.titleColor ?? null,
               backgroundColor: nextCover.backgroundColor,
-              stickers: nextCover.stickers,
+              stickers: [],
               photos: nextCover.photos,
               texts: nextCover.texts,
               coverPhotoId: nextCover.coverPhotoId,
@@ -906,7 +906,6 @@ export function DiaryProvider({ children }: PropsWithChildren) {
         fontId: input.decoration.fontId,
       });
       const nextDecoration = buildPhotoDecoration({
-        stickers: input.decoration.stickers ?? [],
         texts,
         cropRect: input.decoration.cropRect,
       });
@@ -922,7 +921,7 @@ export function DiaryProvider({ children }: PropsWithChildren) {
           textContent: nextDecoration.note.slice(0, 500),
           font: String(nextDecoration.fontId).slice(0, 50),
           stickerLayout: {
-            stickers: nextDecoration.stickers,
+            stickers: [],
             texts: nextDecoration.texts,
             cropRect: nextDecoration.cropRect ?? null,
           },
@@ -1047,7 +1046,6 @@ export function DiaryProvider({ children }: PropsWithChildren) {
 
       const next = buildPlacePageDecoration({
         photos: input.decoration.photos ?? [],
-        stickers: input.decoration.stickers ?? [],
         texts: input.decoration.texts ?? [],
       });
       const nextDiary: Diary = {

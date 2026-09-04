@@ -2,19 +2,23 @@ import { listFestivals } from '../api/festivals';
 import type { TourApiPlaceItem } from '../api/types';
 import type { Festival, RegionSelection } from '../types/festival';
 
-const DISTRICT_ALIASES: Record<string, string[]> = {
-  '서울|홍대/신촌': ['마포구', '서대문구'],
-  '서울|종로/중구': ['종로구', '중구'],
-  '서울|송파/강동': ['송파구', '강동구'],
-  '서울|성수/여의도': ['성동구', '영등포구'],
-  '경기|수원': ['수원시'],
-  '경기|가평': ['가평군'],
-  '경기|고양/파주': ['고양시', '파주시'],
-  '경기|용인': ['용인시'],
-  '강원|강릉': ['강릉시'],
-  '강원|평창': ['평창군'],
-  '강원|속초/양양': ['속초시', '양양군'],
-};
+function normalizeRegionName(value: string): string {
+  return value
+    .trim()
+    .replace(/특별자치도|특별시|광역시|특별자치시/g, '')
+    .replace(/도$/, '');
+}
+
+function matchesRegionName(festivalRegion: string, selectionRegion: string): boolean {
+  const festival = normalizeRegionName(festivalRegion);
+  const selected = normalizeRegionName(selectionRegion);
+  if (!festival || !selected) return false;
+  return (
+    festival === selected ||
+    festivalRegion.includes(selectionRegion) ||
+    selectionRegion.includes(festivalRegion)
+  );
+}
 
 let festivalCache: Promise<Festival[]> | null = null;
 
@@ -88,13 +92,16 @@ export function matchesFestivalRegion(
   festival: Festival,
   selection: RegionSelection,
 ): boolean {
-  if (festival.region !== selection.region) return false;
-  const aliases =
-    DISTRICT_ALIASES[`${selection.region}|${selection.district}`] ??
-    [selection.district];
-  return aliases.some(
-    (alias) =>
-      festival.district.includes(alias) ||
-      festival.address?.includes(alias),
+  if (!matchesRegionName(festival.region, selection.region)) {
+    return false;
+  }
+
+  const district = selection.district.trim();
+  if (!district) return true;
+
+  return (
+    festival.district.includes(district) ||
+    district.includes(festival.district) ||
+    (festival.address?.includes(district) ?? false)
   );
 }

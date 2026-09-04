@@ -23,6 +23,7 @@ export async function mergeTripWithLocal(
 
   return {
     id: trip.id,
+    userId: trip.userId ?? local?.userId ?? null,
     name: trip.title?.trim() || local?.name || '나의 여행',
     place,
     createdAt: trip.startedAt,

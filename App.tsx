@@ -6,7 +6,7 @@ import { AiCourseProvider } from './src/context/AiCourseContext';
 import { AuthProvider } from './src/context/AuthContext';
 import { DiaryProvider } from './src/context/DiaryContext';
 import { RootNavigator } from './src/navigation/RootNavigator';
-import { KERIS_KEDU_FONT_FAMILY } from './src/utils/decorAssets';
+import { KERIS_KEDU_FONT_FAMILY, PRETENDARD_FONT_FAMILY } from './src/utils/decorAssets';
 import { colors } from './src/theme';
 
 export default function App() {
@@ -14,6 +14,9 @@ export default function App() {
     [KERIS_KEDU_FONT_FAMILY.regular]: require('./assets/fonts/KERISKEDU_R.otf'),
     [KERIS_KEDU_FONT_FAMILY.bold]: require('./assets/fonts/KERISKEDU_B.otf'),
     [KERIS_KEDU_FONT_FAMILY.line]: require('./assets/fonts/KERISKEDU_Line.otf'),
+    [PRETENDARD_FONT_FAMILY.regular]: require('./assets/fonts/Pretendard-Regular.otf'),
+    [PRETENDARD_FONT_FAMILY.medium]: require('./assets/fonts/Pretendard-Medium.otf'),
+    [PRETENDARD_FONT_FAMILY.bold]: require('./assets/fonts/Pretendard-Bold.otf'),
   });
 
   if (!fontsLoaded) {

@@ -8,10 +8,7 @@ import {
   View,
 } from 'react-native';
 
-import {
-  clampStickerScale,
-  normalizeRotation,
-} from './DraggableSticker';
+import { clampStickerScale, normalizeRotation } from '../../utils/stickerTransform';
 import { useLiveDecorTransform } from './useLiveDecorTransform';
 import { DecorPhotoLayer, PhotoCropRect } from '../../types/diary';
 import { normalizeCropRect } from '../../utils/diaryTextLayers';
@@ -250,7 +247,7 @@ export function DraggablePhoto({
           marginLeft: -frameSize.width / 2,
           marginTop: -frameSize.height / 2,
           transform: [{ scale: live.scale }, { rotate: `${live.rotation}deg` }],
-          zIndex: selected ? 20 : 5,
+          zIndex: typeof layer.zIndex === 'number' ? layer.zIndex : 1,
         },
       ]}
     >
@@ -287,7 +284,7 @@ const styles = StyleSheet.create({
     elevation: 4,
   },
   mediaClip: {
-    ...StyleSheet.absoluteFillObject,
+    ...StyleSheet.absoluteFill,
     overflow: 'hidden',
   },
   mediaBase: {

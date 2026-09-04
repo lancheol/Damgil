@@ -98,7 +98,7 @@ const styles = StyleSheet.create({
     elevation: 8,
   },
   rim: {
-    ...StyleSheet.absoluteFillObject,
+    ...StyleSheet.absoluteFill,
     borderRadius: radii.xl,
     borderWidth: StyleSheet.hairlineWidth,
     borderColor: 'rgba(255,255,255,0.06)',

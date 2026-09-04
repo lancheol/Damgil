@@ -568,7 +568,7 @@ const styles = StyleSheet.create({
     color: colors.white,
   },
   blockingOverlay: {
-    ...StyleSheet.absoluteFillObject,
+    ...StyleSheet.absoluteFill,
     backgroundColor: 'rgba(0,0,0,0.45)',
     alignItems: 'center',
     justifyContent: 'center',
